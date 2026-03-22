@@ -1,0 +1,19 @@
+# ============================================================
+#  VIDEO QUEUE — topics.txt
+#  One topic per line. Lines starting with # are ignored.
+#  Run with: python batch.py --auto
+# ============================================================
+
+# --- Canadian Scandals ---
+The Avro Arrow — how Canada built the world's most advanced fighter jet and then destroyed every single one
+The Gerda Munsinger Affair — the Soviet spy who slept her way through Canada's cabinet
+The Bre-X gold fraud — the greatest mining scam in history and the man who fell from a helicopter
+Nortel — how Canada's most valuable company lost four hundred billion dollars in eighteen months
+
+# --- Dark History ---
+The Dionne Quintuplets — the five sisters the government kidnapped and put on display
+The Montreal CIA mind control experiments — how Canadian patients had their memories erased
+The Christie Pits Riot — the night Toronto tore itself apart
+The Halifax Explosion — the largest man-made explosion before the atomic bomb
+
+# --- Add your own below ---

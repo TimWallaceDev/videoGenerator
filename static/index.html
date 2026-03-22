@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Pipeline</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0a0a;
+    --surface:   #111111;
+    --border:    #222222;
+    --accent:    #e8ff00;
+    --accent2:   #ff4444;
+    --text:      #e8e8e8;
+    --muted:     #555555;
+    --success:   #00ff88;
+    --warning:   #ffaa00;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    padding: 0;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+
+  header h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 32px;
+    letter-spacing: 3px;
+    color: var(--accent);
+    line-height: 1;
+  }
+
+  header span {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    grid-template-rows: auto 1fr;
+    gap: 0;
+    min-height: calc(100vh - 73px);
+  }
+
+  /* ---- Submit panel ---- */
+  .submit-panel {
+    grid-column: 1;
+    grid-row: 1;
+    padding: 28px 32px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .submit-panel label {
+    display: block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 10px;
+  }
+
+  .input-row input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 15px;
+    padding: 12px 16px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .input-row input:focus {
+    border-color: var(--accent);
+  }
+
+  .input-row input::placeholder {
+    color: var(--muted);
+  }
+
+  .btn {
+    background: var(--accent);
+    color: #000;
+    border: none;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+    padding: 12px 28px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+  }
+
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn.danger {
+    background: var(--accent2);
+    color: #fff;
+    font-size: 13px;
+    padding: 6px 14px;
+  }
+
+  /* ---- Status panel ---- */
+  .status-panel {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .status-content {
+    padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .status-idle {
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    text-align: center;
+    padding: 40px 0;
+  }
+
+  .current-topic {
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--text);
+  }
+
+  .step-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
+
+  .detail-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .progress-bar {
+    width: 100%;
+    height: 3px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 0.5s ease;
+  }
+
+  /* Animated pulse when running */
+  .progress-bar.running::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 40%;
+    background: linear-gradient(90deg, transparent, rgba(232,255,0,0.4), transparent);
+    animation: sweep 1.5s linear infinite;
+  }
+
+  @keyframes sweep {
+    from { left: -40%; }
+    to   { left: 140%; }
+  }
+
+  .log-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    height: 180px;
+    overflow-y: auto;
+    line-height: 1.6;
+    flex-shrink: 0;
+  }
+
+  .log-box .log-line { color: #888; }
+  .log-box .log-line.recent { color: var(--text); }
+
+  .elapsed {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* ---- Queue + Videos ---- */
+  .main-content {
+    grid-column: 1;
+    grid-row: 2;
+    padding: 28px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    overflow-y: auto;
+  }
+
+  .section-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  .queue-list, .video-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .queue-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .queue-item .pos {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    color: var(--muted);
+    width: 24px;
+    text-align: center;
+  }
+
+  .queue-item .topic {
+    flex: 1;
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  .badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 3px 8px;
+    text-transform: uppercase;
+  }
+
+  .badge.queued  { background: var(--border); color: var(--muted); }
+  .badge.running { background: var(--accent); color: #000; }
+  .badge.done    { background: var(--success); color: #000; }
+  .badge.failed  { background: var(--accent2); color: #fff; }
+
+  .video-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .video-item .filename {
+    flex: 1;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .video-item .meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .download-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--accent);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 6px 12px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: border-color 0.2s, background 0.2s;
+    white-space: nowrap;
+  }
+
+  .download-btn:hover {
+    border-color: var(--accent);
+    background: rgba(232,255,0,0.06);
+  }
+
+  .empty-state {
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 16px 0;
+  }
+
+  /* Flicker on load */
+  @keyframes flicker {
+    0%, 100% { opacity: 1; }
+    92%       { opacity: 1; }
+    93%       { opacity: 0.8; }
+    94%       { opacity: 1; }
+    96%       { opacity: 0.9; }
+    97%       { opacity: 1; }
+  }
+
+  header h1 { animation: flicker 8s infinite; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--accent);
+    color: #000;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 1px;
+    padding: 10px 20px;
+    transition: transform 0.3s ease;
+    z-index: 1000;
+  }
+
+  .toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>VIDEO PIPELINE</h1>
+  <span>Automated Production System</span>
+</header>
+
+<div class="layout">
+
+  <!-- Submit -->
+  <div class="submit-panel">
+    <label>New Video Topic</label>
+    <div class="input-row">
+      <input type="text" id="topicInput"
+        placeholder="e.g. The Avro Arrow — how Canada destroyed its greatest achievement"
+        onkeydown="if(event.key==='Enter') submitTopic()">
+      <button class="btn" onclick="submitTopic()">QUEUE IT</button>
+    </div>
+  </div>
+
+  <!-- Status sidebar -->
+  <div class="status-panel">
+    <div class="panel-title">Pipeline Status</div>
+    <div class="status-content" id="statusContent">
+      <div class="status-idle">— idle —</div>
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div class="main-content">
+
+    <!-- Queue -->
+    <div>
+      <div class="section-title">Queue</div>
+      <div class="queue-list" id="queueList">
+        <div class="empty-state">No topics queued.</div>
+      </div>
+    </div>
+
+    <!-- Completed videos -->
+    <div>
+      <div class="section-title">Completed Videos</div>
+      <div class="video-list" id="videoList">
+        <div class="empty-state">No videos yet.</div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  let lastStatus = null;
+
+  // ---- Submit topic ----
+  async function submitTopic() {
+    const input = document.getElementById('topicInput');
+    const topic = input.value.trim();
+    if (!topic) return;
+
+    try {
+      const res = await fetch('/queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topic })
+      });
+      const data = await res.json();
+      input.value = '';
+      showToast(`Added to queue: position ${data.position}`);
+      refreshQueue();
+    } catch (e) {
+      showToast('Failed to add topic');
+    }
+  }
+
+  // ---- Remove from queue ----
+  async function removeFromQueue(id) {
+    try {
+      await fetch(`/queue/${id}`, { method: 'DELETE' });
+      refreshQueue();
+    } catch(e) {}
+  }
+
+  // ---- Refresh queue ----
+  async function refreshQueue() {
+    try {
+      const res  = await fetch('/queue');
+      const data = await res.json();
+
+      const queueEl = document.getElementById('queueList');
+      const allItems = [
+        ...data.queue.map((item, i) => ({ ...item, pos: i + 1 })),
+        ...data.history
+      ];
+
+      if (allItems.length === 0) {
+        queueEl.innerHTML = '<div class="empty-state">No topics queued.</div>';
+      } else {
+        queueEl.innerHTML = allItems.map(item => `
+          <div class="queue-item">
+            <div class="pos">${item.pos || '—'}</div>
+            <div class="topic">${escHtml(item.topic)}</div>
+            <span class="badge ${item.status}">${item.status}</span>
+            ${item.status === 'queued'
+              ? `<button class="btn danger" onclick="removeFromQueue('${item.id}')">✕</button>`
+              : ''}
+          </div>
+        `).join('');
+      }
+    } catch(e) {}
+  }
+
+  // ---- Refresh videos ----
+  async function refreshVideos() {
+    try {
+      const res  = await fetch('/videos');
+      const data = await res.json();
+      const el   = document.getElementById('videoList');
+
+      if (data.videos.length === 0) {
+        el.innerHTML = '<div class="empty-state">No videos yet.</div>';
+      } else {
+        el.innerHTML = data.videos.map(v => `
+          <div class="video-item">
+            <div class="filename">${escHtml(v.filename)}</div>
+            <div class="meta">${v.size_mb} MB</div>
+            <a class="download-btn" href="${v.url}" download>↓ DOWNLOAD</a>
+          </div>
+        `).join('');
+      }
+    } catch(e) {}
+  }
+
+  // ---- Poll status ----
+  async function pollStatus() {
+    try {
+      const res    = await fetch('/status');
+      const status = await res.json();
+
+      const el = document.getElementById('statusContent');
+
+      if (!status.running && !status.topic) {
+        el.innerHTML = '<div class="status-idle">— idle —</div>';
+        return;
+      }
+
+      const elapsed = status.elapsed_sec
+        ? `${Math.floor(status.elapsed_sec/60)}m ${status.elapsed_sec%60}s`
+        : '—';
+
+      const logs = (status.log_lines || []).slice(-8).map((line, i, arr) =>
+        `<div class="log-line ${i === arr.length-1 ? 'recent' : ''}">${escHtml(line)}</div>`
+      ).join('');
+
+      const progressPct = status.progress || 0;
+      const isRunning   = status.running;
+      const isError     = !!status.error;
+
+      el.innerHTML = `
+        <div class="current-topic">${escHtml(status.topic)}</div>
+        <div class="step-label">${escHtml(status.step || '...')}</div>
+        <div class="progress-bar ${isRunning ? 'running' : ''}">
+          <div class="progress-fill" style="width:${progressPct}%"></div>
+        </div>
+        <div class="detail-label">${escHtml(status.detail || '')}</div>
+        <div class="elapsed">Elapsed: ${elapsed}</div>
+        <div class="log-box">${logs}</div>
+        ${isError ? `<div class="badge failed">Error: ${escHtml(status.error)}</div>` : ''}
+        ${!isRunning && status.output_file
+          ? `<a class="download-btn" href="/download/${encodeURIComponent(status.output_file.split(/[\\/]/).pop())}" download>↓ DOWNLOAD LATEST</a>`
+          : ''}
+      `;
+
+      // Detect completion to refresh video list
+      if (!isRunning && lastStatus && lastStatus.running) {
+        refreshVideos();
+        refreshQueue();
+      }
+      lastStatus = status;
+
+    } catch(e) {}
+  }
+
+  // ---- Helpers ----
+  function escHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
+  // ---- Init ----
+  refreshQueue();
+  refreshVideos();
+  pollStatus();
+
+  setInterval(pollStatus,   3000);
+  setInterval(refreshQueue, 5000);
+  setInterval(refreshVideos, 10000);
+</script>
+</body>
+</html>
