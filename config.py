@@ -15,6 +15,7 @@ WORKFLOWS_DIR   = os.path.join(BASE_DIR, "workflows")
 SCRIPT_FILE     = os.path.join(TEMP_DIR, "script.txt")
 AUDIO_FILE      = os.path.join(TEMP_DIR, "audio.wav")
 TIMESTAMPS_FILE = os.path.join(TEMP_DIR, "timestamps.json")
+WORDS_FILE      = os.path.join(TEMP_DIR, "words.json")
 
 # --- Ollama ---
 OLLAMA_MODEL    = "qwen2.5:14b"
@@ -30,14 +31,45 @@ FFMPEG_BIN = r"C:\Users\RAZER\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpe
 FFMPEG     = os.path.join(FFMPEG_BIN, "ffmpeg.exe")
 FFPROBE    = os.path.join(FFMPEG_BIN, "ffprobe.exe")
 
-# --- Video ---
-VIDEO_FPS       = 30
-VIDEO_WIDTH     = 1280
-VIDEO_HEIGHT    = 720
+# --- Captions (Shorts only) ---
+# Style options:
+#   "word"      — one word at a time, big and punchy
+#   "duo"       — two words at a time, more readable
+#   "highlight" — full sentence, current word highlighted yellow
+CAPTION_STYLE       = "duo"
+CAPTION_FONT        = r"C:\Windows\Fontsrialbd.ttf"
+CAPTION_FONT_SIZE   = 72     # pixels — increase for bigger text
+CAPTION_COLOR       = "white"
+CAPTION_HIGHLIGHT   = "yellow"
+CAPTION_OUTLINE     = "black"
+CAPTION_OUTLINE_PX  = 4      # outline thickness in pixels
+CAPTION_Y_POS       = 0.75   # vertical position as fraction of height (0.75 = bottom third)
 
 # --- Pipeline behaviour ---
 # Set to True to skip all checkpoints (fully automated)
-AUTO_MODE       = False
+AUTO_MODE = False
+
+# --- Video mode configs ---
+# "long"  = YouTube long form (1280x720, 9-12 min)
+# "short" = YouTube Shorts   (720x1280, 45-60 sec)
+VIDEO_CONFIGS = {
+    "long": {
+        "width":   1280,
+        "height":  720,
+        "fps":     30,
+    },
+    "short": {
+        "width":   720,
+        "height":  1280,
+        "fps":     30,
+    },
+}
+
+# Default mode — overridden at runtime by main.py / server.py
+VIDEO_MODE   = "long"
+VIDEO_WIDTH  = VIDEO_CONFIGS[VIDEO_MODE]["width"]
+VIDEO_HEIGHT = VIDEO_CONFIGS[VIDEO_MODE]["height"]
+VIDEO_FPS    = VIDEO_CONFIGS[VIDEO_MODE]["fps"]
 
 # --- Image generation ---
 IMAGE_PROMPT_PREFIX = (
@@ -47,10 +79,11 @@ IMAGE_PROMPT_PREFIX = (
     "no watermarks, no overlays, high detail, "
 )
 
-SCRIPT_SYSTEM_PROMPT = """
+# --- Script prompts ---
+SCRIPT_SYSTEM_PROMPT_LONG = """
 You are a documentary filmmaker writing narration for a YouTube channel covering
-Canadian and Greater Toronto Area history. You write the way the best documentaries
-feel — not a lecture, not a list of facts, but a story with a beating heart.
+a variety of intersting topics. You write the way the best youtube videos
+feel — not a lecture, not a list of facts, but a story with a beating heart and sometimes humor.
 
 WHAT GREAT STORYTELLING MEANS HERE:
 - Every video is about people, not events. Events are just the backdrop.
@@ -67,7 +100,7 @@ WHAT GREAT STORYTELLING MEANS HERE:
 - Contrast is your best tool. The bigger the dream, the harder the fall.
   The more powerful the person, the more shocking their weakness.
 - End on something that changes how the viewer sees the present, not just
-  the past. History should feel alive, not archived.
+  the past. should feel alive, not archived.
 
 STRUCTURE:
 - Open in the middle of a scene or a moment of tension — never with context
@@ -100,8 +133,61 @@ TECHNICAL RULES:
 - Target length: {target_length}
 """
 
+SCRIPT_SYSTEM_PROMPT_SHORT = """
+You are writing a YouTube Shorts script — a single dramatic historical moment
+told in under sixty seconds. Think of it as a trailer for a story, not the
+story itself. You have one job: make the viewer desperate to know more.
+
+HOW SHORTS WORK:
+- You have roughly one hundred words. Every single one must earn its place.
+- The first sentence is everything. If it doesn't hook instantly, the viewer
+  is already gone. Start with the most shocking or unexpected thing.
+- There is no setup, no context, no background. Drop straight into the moment.
+- Build to one single devastating reveal or question. Not three points —
+  one perfect gut punch.
+- The last sentence should feel like a trapdoor opening under the viewer.
+  Leave them hanging. Leave them wanting to search for more.
+
+STRUCTURE — strictly follow this:
+1. One sentence cold open — the most dramatic moment or fact, no context
+2. Two to three sentences of fast escalating build — just enough to make
+   the reveal land harder
+3. One final sentence — the reveal, the twist, or the unanswered question
+   that makes them hit share
+
+VOICE:
+- Fast, punchy, relentless. No breathing room.
+- Short sentences only. If a sentence is longer than fifteen words, cut it.
+- Present tense where possible — makes the story feel immediate and alive.
+- No throat-clearing phrases. No "today we're looking at." No "interestingly."
+
+TECHNICAL RULES:
+- Write all numbers as words
+- No section headers, no bullet points, just flowing narration
+- No embedded references or citations
+- Each sentence must be a complete thought suitable for a single image
+- Target length: {target_length}
+"""
+
+TARGET_VIDEO_LENGTH_LONG = (
+    "9 to 12 minutes of spoken narration. "
+    "At a natural speaking pace of one hundred and thirty words per minute, "
+    "this requires a minimum of one thousand two hundred words and ideally "
+    "one thousand five hundred words. "
+    "Do not summarize. Expand each point with specific details, dramatic tension, "
+    "and vivid descriptions until you reach this length."
+)
+
+TARGET_VIDEO_LENGTH_SHORT = (
+    "45 to 60 seconds of spoken narration — approximately one hundred to one "
+    "hundred and twenty words total. Not a word more. "
+    "This is a single dramatic beat, not a full story. "
+    "Write the minimum number of sentences needed to deliver maximum impact."
+)
+
+# --- Image prompt system (shared for both modes) ---
 IMAGE_PROMPT_SYSTEM = """
-You are generating image prompts for a cinematic documentary YouTube video.
+You are generating image prompts for a YouTube video.
 For each sentence of narration provided, generate one image prompt.
 
 Rules:
@@ -126,17 +212,5 @@ Rules:
 - Return ONLY a valid JSON array of strings, nothing else, no markdown fences
 
 Example:
-["Close-up of weathered hands gripping a factory workbench, shallow depth \
-of field, 1950s industrial setting, tungsten light, photorealistic 35mm", \
-"Wide shot of an empty airfield at dusk, a single aircraft silhouette on \
-the tarmac, long shadows, muted blue and amber tones, cinematic"]
+["Close-up of weathered hands gripping a factory workbench, shallow depth of field, 1950s industrial setting, tungsten light, photorealistic 35mm", "Wide shot of an empty airfield at dusk, a single aircraft silhouette on the tarmac, long shadows, muted blue and amber tones, cinematic"]
 """
-
-TARGET_VIDEO_LENGTH = (
-    "9 to 12 minutes of spoken narration. "
-    "At a natural speaking pace of one hundred and thirty words per minute, "
-    "this requires a minimum of one thousand two hundred words and ideally "
-    "one thousand five hundred words. "
-    "Do not summarize. Expand each point with specific details, dramatic tension, "
-    "and vivid descriptions until you reach this length."
-)

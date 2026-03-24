@@ -18,6 +18,7 @@ from config import (
     IMAGES_DIR,
     TEMP_DIR,
     IMAGE_PROMPT_PREFIX,
+    VIDEO_CONFIGS,
 )
 from status import pipeline_status
 
@@ -29,7 +30,7 @@ PROMPT_PREFIX = IMAGE_PROMPT_PREFIX
 #  Build the API workflow from expanded subgraph nodes
 # ------------------------------------------------------------
 
-def _build_api_workflow(prompt_text: str, seed: int = None) -> dict:
+def _build_api_workflow(prompt_text: str, seed: int = None, mode: str = "long") -> dict:
     """
     Build the ComfyUI API format workflow dict from the known
     Qwen image subgraph nodes. All node IDs and connections are
@@ -99,12 +100,12 @@ def _build_api_workflow(prompt_text: str, seed: int = None) -> dict:
             }
         },
 
-        # --- Latent image (1280x720) ---
+        # --- Latent image (size depends on mode) ---
         "58": {
             "class_type": "EmptySD3LatentImage",
             "inputs": {
-                "width": 1280,
-                "height": 720,
+                "width":      VIDEO_CONFIGS[mode]["width"],
+                "height":     VIDEO_CONFIGS[mode]["height"],
                 "batch_size": 1,
             }
         },
@@ -155,10 +156,29 @@ def _build_api_workflow(prompt_text: str, seed: int = None) -> dict:
 def _queue_prompt(api_workflow: dict) -> tuple[str, str]:
     """Submit workflow to ComfyUI, return (prompt_id, client_id)."""
     client_id = str(uuid.uuid4())
-    payload   = {"prompt": api_workflow, "client_id": client_id}
+    payload   = {
+        "prompt":      api_workflow,
+        "client_id":   client_id,
+        "extra_data":  {"extra_pnginfo": {}},
+    }
     response  = requests.post(f"{COMFYUI_URL}/prompt", json=payload)
     response.raise_for_status()
     return response.json()["prompt_id"], client_id
+
+
+def _free_comfyui_memory():
+    """
+    Tell ComfyUI to fully unload image models from VRAM.
+    Called once after all images are generated, before moving to next step.
+    """
+    try:
+        requests.post(f"{COMFYUI_URL}/free", json={
+            "unload_models": True,  # fully evict Qwen from VRAM
+            "free_memory":   True,
+        }, timeout=10)
+        print("   🧹 ComfyUI image models unloaded from VRAM")
+    except requests.RequestException:
+        pass  # non-critical, continue regardless
 
 
 def _wait_for_completion(prompt_id: str, client_id: str, timeout: int = 600):
@@ -251,7 +271,7 @@ def _download_image(filename: str, subfolder: str, dest_path: str):
 #  Main function
 # ------------------------------------------------------------
 
-def generate_images(prompts: list[str]) -> list[str]:
+def generate_images(prompts: list[str], mode: str = "long") -> list[str]:
     """
     Generate one image per prompt string.
     Returns an ordered list of local image file paths.
@@ -268,7 +288,7 @@ def generate_images(prompts: list[str]) -> list[str]:
         pipeline_status.update("Image Generation", 5, f"Image {i}/{total}", pct)
         print(f"   Image {i}/{total}...")
 
-        api_workflow = _build_api_workflow(prompt)
+        api_workflow = _build_api_workflow(prompt, mode=mode)
         prompt_id, client_id = _queue_prompt(api_workflow)
         _wait_for_completion(prompt_id, client_id)
 
@@ -279,6 +299,8 @@ def generate_images(prompts: list[str]) -> list[str]:
 
         print(f"   ✅ Image {i} saved")
 
+    # All images done — now unload models to free VRAM for next step
+    _free_comfyui_memory()
     print(f"✅ All {total} images generated")
     return img_paths
 

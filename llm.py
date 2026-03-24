@@ -10,8 +10,10 @@ import subprocess
 import requests
 from config import (
     OLLAMA_MODEL, OLLAMA_BASE_URL,
-    SCRIPT_SYSTEM_PROMPT, IMAGE_PROMPT_SYSTEM,
-    SCRIPT_FILE, TARGET_VIDEO_LENGTH
+    SCRIPT_SYSTEM_PROMPT_LONG, SCRIPT_SYSTEM_PROMPT_SHORT,
+    IMAGE_PROMPT_SYSTEM,
+    SCRIPT_FILE,
+    TARGET_VIDEO_LENGTH_LONG, TARGET_VIDEO_LENGTH_SHORT,
 )
 
 
@@ -44,7 +46,7 @@ def split_into_sentences(text: str) -> list[str]:
 
 def open_in_notepad(filepath: str):
     """Open a file in Notepad and wait for the user to close it."""
-    print(f"\n📝 Opening script in Notepad — edit freely, then save and close Notepad to continue.\n")
+    print(f"\n📝 Opening script in Notepad — edit freely, then save and close to continue.\n")
     subprocess.run(["notepad.exe", filepath])
 
 
@@ -52,21 +54,35 @@ def open_in_notepad(filepath: str):
 #  Main functions
 # ------------------------------------------------------------
 
-def generate_script(topic: str, auto: bool = False, research: str = "") -> str:
+def generate_script(
+    topic: str,
+    auto: bool = False,
+    research: str = "",
+    mode: str = "long"
+) -> str:
     """
     Generate a narration script for the given topic.
+    mode: "long" for full YouTube video, "short" for YouTube Shorts.
+    If research is provided, it is injected as factual grounding.
     If auto is False, opens the script in Notepad for review/editing.
     Returns the final script text.
     """
-    print(f"✍️  Generating script for: '{topic}'...")
+    print(f"✍️  Generating script for: '{topic}' [{mode}]...")
 
-    system = SCRIPT_SYSTEM_PROMPT.format(target_length=TARGET_VIDEO_LENGTH)
+    if mode == "short":
+        system = SCRIPT_SYSTEM_PROMPT_SHORT.format(
+            target_length=TARGET_VIDEO_LENGTH_SHORT
+        )
+    else:
+        system = SCRIPT_SYSTEM_PROMPT_LONG.format(
+            target_length=TARGET_VIDEO_LENGTH_LONG
+        )
 
     if research:
         user = (
             f"Use the following research as your factual foundation. "
-            f"Do not invent facts not supported by the research."
-            f"RESEARCH BRIEF:{research}"
+            f"Do not invent facts not supported by the research.\n\n"
+            f"RESEARCH BRIEF:\n{research}\n\n"
             f"Now write a narration script about: {topic}"
         )
     else:
@@ -160,7 +176,8 @@ def generate_image_prompts(sentences: list[str], auto: bool = False) -> list[str
 if __name__ == "__main__":
     test_topic = "The Avro Arrow — how Canada built the world's most advanced fighter jet"
 
-    script    = generate_script(test_topic, auto=False)
+    # Test long form
+    script    = generate_script(test_topic, auto=False, mode="long")
     sentences = split_into_sentences(script)
     prompts   = generate_image_prompts(sentences, auto=False)
 

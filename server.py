@@ -42,9 +42,10 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 # ============================================================
 
 class QueueItem:
-    def __init__(self, topic: str):
+    def __init__(self, topic: str, mode: str = "long"):
         self.id         = str(uuid.uuid4())[:8]
         self.topic      = topic
+        self.mode       = mode
         self.status     = "queued"   # queued | running | done | failed
         self.added_at   = datetime.now().isoformat()
         self.output     = None
@@ -54,6 +55,7 @@ class QueueItem:
         return {
             "id":       self.id,
             "topic":    self.topic,
+            "mode":     self.mode,
             "status":   self.status,
             "added_at": self.added_at,
             "output":   self.output,
@@ -83,7 +85,7 @@ def queue_worker():
         pipeline_status.start(item.topic)
 
         try:
-            output_path = run_pipeline(topic=item.topic, auto=True)
+            output_path = run_pipeline(topic=item.topic, auto=True, mode=item.mode)
             item.status = "done"
             item.output = output_path
             pipeline_status.finish(output_path)
@@ -114,6 +116,7 @@ def start_worker():
 
 class TopicRequest(BaseModel):
     topic: str
+    mode: str = "long"
 
 
 @app.on_event("startup")
@@ -141,7 +144,8 @@ def add_to_queue(req: TopicRequest):
     if not topic:
         raise HTTPException(status_code=400, detail="Topic cannot be empty")
 
-    item = QueueItem(topic)
+    mode = req.mode if req.mode in ("long", "short") else "long"
+    item = QueueItem(topic, mode=mode)
     with queue_lock:
         queue.append(item)
 

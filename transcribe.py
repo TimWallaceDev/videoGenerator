@@ -1,27 +1,42 @@
 # ============================================================
 #  TRANSCRIBE MODULE — Whisper via faster-whisper
-#  Transcribes the generated audio and extracts sentence-level
-#  timestamps to drive image switching in the final video.
+#  Transcribes the generated audio and matches word-level
+#  timestamps to the ORIGINAL SCRIPT SENTENCES so that
+#  image count always matches timestamp count exactly.
 # ============================================================
 
 import os
-import json
 import re
+import json
 from faster_whisper import WhisperModel
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 from config import (
     AUDIO_FILE,
     TIMESTAMPS_FILE,
+    WORDS_FILE,
+    SCRIPT_FILE,
     TEMP_DIR,
 )
 from status import pipeline_status
 
-# Whisper model size — "medium" is the sweet spot for accuracy vs speed
-# Options: tiny, base, small, medium, large-v2, large-v3
 WHISPER_MODEL_SIZE = "medium"
 
-# Device to run on — "cuda" uses your 4090, "cpu" as fallback
+
+def _unload_model(model: WhisperModel):
+    """
+    Explicitly delete the Whisper model and flush VRAM.
+    Faster-Whisper holds GPU memory until garbage collected.
+    """
+    del model
+    if TORCH_AVAILABLE:
+        torch.cuda.empty_cache()
+    print("   🧹 Whisper model unloaded from VRAM")
 WHISPER_DEVICE     = "cuda"
-WHISPER_COMPUTE    = "float16"  # float16 for GPU, int8 for CPU
+WHISPER_COMPUTE    = "float16"
 
 
 # ------------------------------------------------------------
@@ -38,75 +53,125 @@ def _load_model() -> WhisperModel:
     )
 
 
-def _segments_to_sentences(segments) -> list[dict]:
-    """
-    Convert Whisper word-level segments into sentence-level timestamps.
-    Each sentence gets a start time (when to switch to its image).
+def _clean(text: str) -> str:
+    """Lowercase, strip punctuation and extra whitespace for fuzzy matching."""
+    text = text.lower()
+    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
-    Returns a list of dicts:
-    [
-        {"start": 0.0, "end": 4.2, "text": "Sentence one here."},
-        {"start": 4.2, "end": 9.1, "text": "Sentence two here."},
-        ...
-    ]
-    """
-    # Collect all words with timestamps
+
+def _get_all_words(segments) -> list[dict]:
+    """Extract all word-level timestamps from Whisper segments."""
     words = []
     for segment in segments:
         if hasattr(segment, "words") and segment.words:
             for word in segment.words:
                 words.append({
-                    "word":  word.word,
+                    "word":  word.word.strip(),
                     "start": word.start,
                     "end":   word.end,
                 })
+    return words
 
-    if not words:
-        raise RuntimeError("Whisper returned no word-level timestamps. "
-                           "Make sure the audio file is valid.")
 
-    # Reconstruct full text and split into sentences
-    full_text = " ".join(w["word"].strip() for w in words)
-    raw_sentences = re.split(r'(?<=[.!?])\s+', full_text.strip())
-    sentences = [s.strip() for s in raw_sentences if len(s.strip()) > 5]
+def _match_sentences_to_words(
+    script_sentences: list[str],
+    words: list[dict],
+) -> list[dict]:
+    """
+    Match each script sentence to word-level timestamps from Whisper.
 
-    # Walk through words matching them to sentences
-    sentence_timestamps = []
-    word_idx = 0
+    Strategy:
+    - Clean both script sentences and Whisper words for fuzzy matching
+    - Walk through words sequentially, consuming words that match
+      the first word of the next script sentence
+    - This handles Whisper slightly mishearing words (e.g. "18th" vs
+      "eighteenth") by falling back to positional alignment if needed
 
-    for sentence in sentences:
-        sentence_words = sentence.split()
-        word_count = len(sentence_words)
+    Returns a list of timestamp dicts matching script_sentences length.
+    """
+    results     = []
+    word_idx    = 0
+    total_words = len(words)
 
-        if word_idx >= len(words):
-            break
+    for sent_idx, sentence in enumerate(script_sentences):
+        sent_words   = _clean(sentence).split()
+        n_sent_words = len(sent_words)
 
+        if word_idx >= total_words:
+            # Ran out of words — use last known timestamp
+            last_end = words[-1]["end"] if words else 0
+            results.append({
+                "start": round(last_end, 3),
+                "end":   round(last_end, 3),
+                "text":  sentence,
+            })
+            continue
+
+        # Record start of this sentence
         start_time = words[word_idx]["start"]
 
-        end_idx = min(word_idx + word_count - 1, len(words) - 1)
-        end_time = words[end_idx]["end"]
+        # Try to find the first word of this sentence in the next few words
+        # (handles Whisper inserting filler words)
+        if sent_words:
+            first_word = sent_words[0]
+            for lookahead in range(min(5, total_words - word_idx)):
+                if _clean(words[word_idx + lookahead]["word"]) == first_word:
+                    word_idx   += lookahead
+                    start_time  = words[word_idx]["start"]
+                    break
 
-        sentence_timestamps.append({
+        # Advance word_idx by the number of words in this sentence
+        end_word_idx = min(word_idx + n_sent_words - 1, total_words - 1)
+        end_time     = words[end_word_idx]["end"]
+
+        results.append({
             "start": round(start_time, 3),
             "end":   round(end_time, 3),
             "text":  sentence,
         })
 
-        word_idx += word_count
+        word_idx += n_sent_words
 
-    return sentence_timestamps
+    return results
+
+
+def _load_script_sentences() -> list[str]:
+    """
+    Load the original script sentences from SCRIPT_FILE.
+    Falls back to None if file doesn't exist.
+    """
+    if not os.path.exists(SCRIPT_FILE):
+        return None
+
+    with open(SCRIPT_FILE, "r", encoding="utf-8") as f:
+        script = f.read().strip()
+
+    raw = re.split(r'(?<=[.!?])\s+', script)
+    sentences = [s.strip() for s in raw if len(s.strip()) > 10]
+    return sentences
 
 
 # ------------------------------------------------------------
 #  Main function
 # ------------------------------------------------------------
 
-def transcribe_audio(audio_path: str = None) -> list[dict]:
+def transcribe_audio(
+    audio_path: str = None,
+    script_sentences: list[str] = None,
+) -> list[dict]:
     """
-    Transcribe the audio file and extract sentence-level timestamps.
-    Saves results to TIMESTAMPS_FILE and returns the list.
+    Transcribe the audio file and match timestamps to script sentences.
 
-    Each entry: {"start": float, "end": float, "text": str}
+    If script_sentences is provided (or SCRIPT_FILE exists), timestamps
+    are matched to the original script — guaranteeing the count matches
+    the number of images generated.
+
+    If no script is available, falls back to Whisper's own sentence
+    detection (original behaviour).
+
+    Returns list of {"start", "end", "text"} dicts.
     """
     if audio_path is None:
         audio_path = AUDIO_FILE
@@ -114,12 +179,19 @@ def transcribe_audio(audio_path: str = None) -> list[dict]:
     if not os.path.exists(audio_path):
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
+    # Load script sentences if not passed in
+    if script_sentences is None:
+        script_sentences = _load_script_sentences()
+
+    if script_sentences:
+        print(f"🎧 Transcribing audio (matching to {len(script_sentences)} script sentences)...")
+    else:
+        print(f"🎧 Transcribing audio (no script found, using Whisper sentences)...")
+
     pipeline_status.update("Transcription", 4, "Transcribing audio...", 55)
-    print(f"🎧 Transcribing audio: {os.path.basename(audio_path)}")
 
     model = _load_model()
 
-    # Transcribe with word-level timestamps
     segments, info = model.transcribe(
         audio_path,
         word_timestamps=True,
@@ -134,15 +206,36 @@ def transcribe_audio(audio_path: str = None) -> list[dict]:
     pipeline_status.update("Transcription", 4,
                            f"Processing {info.duration:.0f}s of audio...", 57)
 
-    # Convert generator to list (required before processing)
     segments_list = list(segments)
-    print(f"   Segments: {len(segments_list)}")
+    words         = _get_all_words(segments_list)
 
-    sentences = _segments_to_sentences(segments_list)
+    if not words:
+        raise RuntimeError("Whisper returned no word-level timestamps. "
+                           "Make sure the audio file is valid.")
+
+    print(f"   Words detected: {len(words)}")
+
+    # Save word-level timestamps for caption generation
+    with open(WORDS_FILE, "w", encoding="utf-8") as f:
+        json.dump(words, f, indent=2, ensure_ascii=False)
+
+    if script_sentences:
+        # Primary path — match to original script sentences
+        sentences = _match_sentences_to_words(script_sentences, words)
+        print(f"   Matched to {len(sentences)} script sentences ✓")
+    else:
+        # Fallback — use Whisper's own sentence detection
+        full_text     = " ".join(w["word"] for w in words)
+        raw_sentences = re.split(r'(?<=[.!?])\s+', full_text.strip())
+        raw_sentences = [s.strip() for s in raw_sentences if len(s.strip()) > 5]
+        sentences     = _match_sentences_to_words(raw_sentences, words)
+        print(f"   Detected {len(sentences)} sentences (Whisper fallback)")
+
+    # Unload model to free VRAM for image generation
+    _unload_model(model)
 
     pipeline_status.update("Transcription", 4,
-                           f"Found {len(sentences)} sentences", 59)
-    print(f"   Sentences with timestamps: {len(sentences)}")
+                           f"Matched {len(sentences)} sentences", 59)
 
     # Save to file
     os.makedirs(TEMP_DIR, exist_ok=True)
@@ -167,7 +260,6 @@ def transcribe_audio(audio_path: str = None) -> list[dict]:
 
 if __name__ == "__main__":
     print("🧪 Testing transcribe module...")
-
     sentences = transcribe_audio()
 
     print(f"\n✅ Transcribe test complete.")

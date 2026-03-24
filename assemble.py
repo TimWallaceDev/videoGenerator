@@ -2,11 +2,13 @@
 #  ASSEMBLE MODULE — ffmpeg video assembly
 #  Takes images + audio + Whisper timestamps and builds
 #  the final video with images switching at sentence boundaries.
+#  Includes Ken Burns zoom effect for cinematic movement.
 # ============================================================
 
-import re
 import os
+import re
 import json
+import random
 import subprocess
 import shutil
 from datetime import datetime
@@ -16,17 +18,21 @@ from config import (
     IMAGES_DIR,
     OUTPUT_DIR,
     TEMP_DIR,
-    VIDEO_FPS,
-    VIDEO_WIDTH,
-    VIDEO_HEIGHT,
+    VIDEO_CONFIGS,
     FFMPEG,
-    FFPROBE
 )
 
-# Full path to ffmpeg bin folder
-FFMPEG_BIN = r"C:\Users\RAZER\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1-full_build\bin"
-FFMPEG     = os.path.join(FFMPEG_BIN, "ffmpeg.exe")
-FFPROBE    = os.path.join(FFMPEG_BIN, "ffprobe.exe")
+# ------------------------------------------------------------
+#  Ken Burns settings
+#  ZOOM_START: starting zoom level (1.0 = no zoom)
+#  ZOOM_END:   ending zoom level (1.1 = 10% zoom = moderate)
+#  Adjust ZOOM_END to taste:
+#    Subtle   = 1.05
+#    Moderate = 1.10  <-- current setting
+#    Dramatic = 1.20
+# ------------------------------------------------------------
+ZOOM_START = 1.0
+ZOOM_END   = 1.1
 
 
 # ------------------------------------------------------------
@@ -39,11 +45,15 @@ def _load_timestamps() -> list[dict]:
 
 
 def _get_audio_duration(audio_path: str) -> float:
-    result = subprocess.run([FFMPEG, "-i", audio_path], capture_output=True, text=True)
+    """Use ffmpeg to get the exact duration of the audio file in seconds."""
+    result = subprocess.run(
+        [FFMPEG, "-i", audio_path],
+        capture_output=True, text=True
+    )
     for line in result.stderr.splitlines():
         if "Duration" in line:
             time_str = line.split("Duration:")[1].split(",")[0].strip()
-            h, m, s = time_str.split(":")
+            h, m, s  = time_str.split(":")
             return float(h) * 3600 + float(m) * 60 + float(s)
     raise RuntimeError(f"Could not determine duration of {audio_path}")
 
@@ -58,52 +68,80 @@ def _get_sorted_images(images_dir: str) -> list[str]:
     return [os.path.join(images_dir, f) for f in files]
 
 
+def _kenburns_filter(
+    stream_idx: int,
+    duration: float,
+    width: int,
+    height: int,
+    fps: int,
+    zoom_in: bool,
+) -> str:
+    """
+    Build a Ken Burns zoompan filter for a single image segment.
+    The image is scaled to 2x first to give zoom headroom without pixelating.
+    """
+    n_frames   = max(1, int(duration * fps))
+    zoom_range = ZOOM_END - ZOOM_START
+
+    if zoom_in:
+        zoom_expr = (
+            f"'if(eq(on,1),{ZOOM_START},"
+            f"min(zoom+{zoom_range / n_frames:.6f},{ZOOM_END}))'"
+        )
+    else:
+        zoom_expr = (
+            f"'if(eq(on,1),{ZOOM_END},"
+            f"max(zoom-{zoom_range / n_frames:.6f},{ZOOM_START}))'"
+        )
+
+    x_expr = "'iw/2-(iw/zoom/2)'"
+    y_expr = "'ih/2-(ih/zoom/2)'"
+
+    return (
+        f"[{stream_idx}:v]"
+        f"scale={width*2}:{height*2},"
+        f"zoompan="
+        f"z={zoom_expr}:"
+        f"x={x_expr}:"
+        f"y={y_expr}:"
+        f"d={n_frames}:"
+        f"s={width}x{height}:"
+        f"fps={fps},"
+        f"trim=duration={duration:.3f},"
+        f"setpts=PTS-STARTPTS"
+        f"[kb{stream_idx}]"
+    )
+
+
 def _build_filter_complex(
     image_paths: list[str],
     timestamps: list[dict],
     audio_duration: float,
+    width: int = 1280,
+    height: int = 720,
+    fps: int = 30,
 ) -> tuple[list[str], str]:
     """
     Build the ffmpeg input args and filter_complex string for
-    timestamp-driven image switching.
-
-    Strategy:
-    - Each image is a separate input stream (looped)
-    - overlay filter switches between images at sentence start times
-    - Last image holds until audio ends
-
+    timestamp-driven image switching with Ken Burns zoom effect.
     Returns (input_args, filter_complex_string)
     """
     n_images = len(image_paths)
     n_stamps = len(timestamps)
 
-    # Match images to timestamps — if more images than timestamps or vice versa,
-    # we map as many as we can and hold the last image for the remainder
+    # Match images to timestamps
     pairs = []
     for i in range(max(n_images, n_stamps)):
-        img_idx   = min(i, n_images - 1)
-        ts_start  = timestamps[i]["start"] if i < n_stamps else None
+        img_idx  = min(i, n_images - 1)
+        ts_start = timestamps[i]["start"] if i < n_stamps else None
         pairs.append((img_idx, ts_start))
 
-    # Build input args — each image is a looped input
+    # Build input args — each image as a looped input
     input_args = []
     for path in image_paths:
         input_args += ["-loop", "1", "-i", path]
 
-    # Build filter_complex using the overlay/enable approach
-    # Scale each image to target resolution first
-    filter_parts = []
-
-    for idx in range(n_images):
-        filter_parts.append(
-            f"[{idx}:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}:"
-            f"force_original_aspect_ratio=decrease,"
-            f"pad={VIDEO_WIDTH}:{VIDEO_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
-            f"setsar=1,fps={VIDEO_FPS}[v{idx}]"
-        )
-
-    # Build the concat list — each image shown for its duration
-    # Calculate duration for each image segment
+    # Calculate duration for each segment
     segments = []
     for i, (img_idx, ts_start) in enumerate(pairs):
         if i < len(pairs) - 1:
@@ -115,20 +153,27 @@ def _build_filter_complex(
         else:
             duration = audio_duration - (ts_start or 0)
 
-        duration = max(duration, 0.1)  # safety floor
+        duration = max(duration, 0.5)  # zoompan needs at least a few frames
         segments.append((img_idx, duration))
 
-    # Build concat filter
-    concat_inputs = ""
-    for i, (img_idx, duration) in enumerate(segments):
-        filter_parts.append(
-            f"[v{img_idx}]trim=duration={duration:.3f},setpts=PTS-STARTPTS[seg{i}]"
-        )
-        concat_inputs += f"[seg{i}]"
+    # Build Ken Burns filter per segment
+    filter_parts   = []
+    zoom_directions = {}
 
-    n_segs = len(segments)
+    for i, (img_idx, duration) in enumerate(segments):
+        if img_idx not in zoom_directions:
+            zoom_directions[img_idx] = random.choice([True, False])
+        zoom_in = zoom_directions[img_idx]
+
+        kb = _kenburns_filter(img_idx, duration, width, height, fps, zoom_in)
+        # Make output tag segment-specific (same image can appear multiple times)
+        kb = kb.replace(f"[kb{img_idx}]", f"[kb{i}]")
+        filter_parts.append(kb)
+
+    # Concat all segments
+    concat_inputs = "".join(f"[kb{i}]" for i in range(len(segments)))
     filter_parts.append(
-        f"{concat_inputs}concat=n={n_segs}:v=1:a=0[outv]"
+        f"{concat_inputs}concat=n={len(segments)}:v=1:a=0[outv]"
     )
 
     filter_complex = ";\n".join(filter_parts)
@@ -144,12 +189,13 @@ def assemble_video(
     audio_path: str = None,
     timestamps: list[dict] = None,
     topic: str = "video",
+    mode: str = "long",
 ) -> str:
     """
     Assemble the final video from images, audio, and timestamps.
+    Applies Ken Burns zoom effect to each image.
     Returns the path to the output video file.
     """
-    # Load from files if not passed directly
     if audio_path is None:
         audio_path = AUDIO_FILE
     if timestamps is None:
@@ -165,30 +211,35 @@ def assemble_video(
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     audio_duration = _get_audio_duration(audio_path)
-    print(f"📹 Assembling video...")
+    cfg            = VIDEO_CONFIGS[mode]
+
+    print(f"📹 Assembling video (Ken Burns enabled)...")
+    print(f"   Mode      : {mode} ({cfg['width']}x{cfg['height']})")
     print(f"   Images    : {len(image_paths)}")
     print(f"   Timestamps: {len(timestamps)}")
     print(f"   Duration  : {audio_duration:.1f}s")
 
-    # Warn if image/timestamp counts don't match
     if len(image_paths) != len(timestamps):
         print(f"   ⚠️  Image count ({len(image_paths)}) != "
               f"timestamp count ({len(timestamps)}). "
               f"Will map as many as possible.")
 
     input_args, filter_complex = _build_filter_complex(
-        image_paths, timestamps, audio_duration
+        image_paths, timestamps, audio_duration,
+        width=cfg["width"], height=cfg["height"], fps=cfg["fps"]
     )
 
-    # Output filename with timestamp
+    # Output filename
     safe_topic  = re.sub(r'[^\w\s-]', '', topic).strip().replace(' ', '_')[:50]
     timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = os.path.join(OUTPUT_DIR, f"{safe_topic}_{timestamp}.mp4")
 
-    # Write filter_complex to a temp file to avoid command line length limits
+    # Write filter_complex to temp file to avoid command line length limits
     filter_file = os.path.join(TEMP_DIR, "filter_complex.txt")
-    with open(filter_file, "w") as f:
+    with open(filter_file, "w", encoding="utf-8") as f:
         f.write(filter_complex)
+
+    print(f"   Running ffmpeg (zoom processing may take a few extra minutes)...")
 
     cmd = (
         [FFMPEG, "-y"]
@@ -197,7 +248,7 @@ def assemble_video(
         + ["-filter_complex_script", filter_file]
         + [
             "-map", "[outv]",
-            "-map", f"{len(image_paths)}:a",  # audio is the last input
+            "-map", f"{len(image_paths)}:a",
             "-c:v", "libx264",
             "-preset", "fast",
             "-crf", "18",
@@ -209,21 +260,16 @@ def assemble_video(
         ]
     )
 
-    print(f"   DEBUG cmd: {cmd}")
-    print(f"   Running ffmpeg...")
     result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stderr[-2000:])  # ADD THIS
-
 
     if result.returncode != 0:
         print("\n❌ ffmpeg error:")
-        print(result.stderr[-3000:])  # last 3000 chars of stderr
+        print(result.stderr[-3000:])
         raise RuntimeError("ffmpeg assembly failed")
 
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     print(f"✅ Video saved to {output_path} ({size_mb:.1f} MB)")
 
-    # Clean up filter file
     if os.path.exists(filter_file):
         os.remove(filter_file)
 
@@ -244,9 +290,6 @@ def cleanup_temp():
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
-    import re
     print("🧪 Testing assemble module...")
-    print("   Using existing temp/ files from previous module tests")
-
     output = assemble_video(topic="scarborough_test")
     print(f"\n✅ Assemble test complete: {output}")

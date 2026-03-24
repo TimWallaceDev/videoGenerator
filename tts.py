@@ -38,6 +38,18 @@ NODE_LOADAUDIO = "4"   # LoadAudio (voice reference)
 #  Helpers
 # ------------------------------------------------------------
 
+def _free_comfyui_memory():
+    """Flush ComfyUI VRAM after TTS to free space for image generation."""
+    try:
+        requests.post(f"{COMFYUI_URL}/free", json={
+            "unload_models": True,  # fully unload TTS model after audio done
+            "free_memory":   True,
+        }, timeout=10)
+        print("   🧹 ComfyUI VRAM freed after TTS")
+    except requests.RequestException:
+        pass
+
+
 def _load_workflow() -> dict:
     with open(CHATTERBOX_WORKFLOW, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -319,6 +331,7 @@ def generate_audio(script: str) -> str:
             os.remove(path)
 
     print(f"✅ Audio saved to {AUDIO_FILE}")
+    _free_comfyui_memory()  # unload Chatterbox before image gen
     return AUDIO_FILE
 
 

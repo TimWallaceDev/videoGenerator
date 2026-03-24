@@ -2,11 +2,11 @@
 #  VIDEO PIPELINE — MAIN ORCHESTRATOR
 #  Usage:
 #    python main.py "The history of Scarborough, Toronto"
-#    python main.py "The history of Etobicoke" --auto
+#    python main.py "The Avro Arrow" --auto
+#    python main.py "Crazy history fact" --auto --mode short
 # ============================================================
 
 import os
-import re
 import sys
 import json
 import argparse
@@ -20,7 +20,7 @@ from transcribe import transcribe_audio
 from imagegen   import generate_images
 from assemble   import assemble_video, cleanup_temp
 from research   import research_topic
-from status import pipeline_status
+from status     import pipeline_status
 
 from config import (
     TEMP_DIR,
@@ -28,6 +28,7 @@ from config import (
     IMAGES_DIR,
     TIMESTAMPS_FILE,
     AUDIO_FILE,
+    VIDEO_CONFIGS,
 )
 
 
@@ -67,15 +68,19 @@ def load_state() -> dict:
 #  Main pipeline
 # ------------------------------------------------------------
 
-def run_pipeline(topic: str, auto: bool = False):
+def run_pipeline(topic: str, auto: bool = False, mode: str = "long"):
     """
     Full pipeline from topic string to finished .mp4.
+    mode: "long" for YouTube long form, "short" for YouTube Shorts.
     """
+    cfg        = VIDEO_CONFIGS[mode]
     start_time = datetime.now()
+
     print(f"\n{'='*60}")
     print(f"  🎬 VIDEO PIPELINE STARTING")
     print(f"  Topic : {topic}")
-    print(f"  Mode  : {'AUTO' if auto else 'MANUAL (checkpoints on)'}")
+    print(f"  Mode  : {'AUTO' if auto else 'MANUAL'} | {mode.upper()}"
+          f" ({cfg['width']}x{cfg['height']})")
     print(f"  Time  : {start_time.strftime('%H:%M:%S')}")
     print(f"{'='*60}\n")
 
@@ -87,13 +92,13 @@ def run_pipeline(topic: str, auto: bool = False):
     state = load_state()
 
     # --------------------------------------------------------
-    #  STEP 1 — Generate script
+    #  STEP 1 — Research + Generate script
     # --------------------------------------------------------
     if "script" not in state:
         pipeline_status.update("Research + Script", 1, "Researching topic...", 5)
         print("[ Step 1 / 5 ] — Research + Script generation")
         research = research_topic(topic)
-        script = generate_script(topic, auto=auto, research=research)
+        script = generate_script(topic, auto=auto, research=research, mode=mode)
         state["script"] = script
         save_state(state)
     else:
@@ -110,7 +115,6 @@ def run_pipeline(topic: str, auto: bool = False):
         pipeline_status.update("Image Prompts", 2, "Generating prompts...", 25)
         print("[ Step 2 / 5 ] — Image prompt generation")
 
-        # Checkpoint after script, before image prompts
         checkpoint("Review script before generating image prompts", auto)
 
         prompts = generate_image_prompts(sentences, auto=auto)
@@ -122,8 +126,7 @@ def run_pipeline(topic: str, auto: bool = False):
 
     print(f"             {len(prompts)} prompts\n")
 
-    # Checkpoint after prompts, before image generation
-    checkpoint("Review image prompts before starting image generation (~10 min)", auto)
+    checkpoint("Review image prompts before starting image generation", auto)
 
     # --------------------------------------------------------
     #  STEP 3 — Generate audio
@@ -141,7 +144,7 @@ def run_pipeline(topic: str, auto: bool = False):
     if not os.path.exists(TIMESTAMPS_FILE):
         pipeline_status.update("Transcription", 4, "Running Whisper...", 55)
         print("[ Step 4 / 5 ] — Transcription (Whisper)")
-        timestamps = transcribe_audio(AUDIO_FILE)
+        timestamps = transcribe_audio(AUDIO_FILE, script_sentences=sentences)
     else:
         print("[ Step 4 / 5 ] — Timestamps (found existing file, skipping)")
         with open(TIMESTAMPS_FILE, "r") as f:
@@ -152,12 +155,13 @@ def run_pipeline(topic: str, auto: bool = False):
     #  STEP 5 — Generate images
     # --------------------------------------------------------
     existing_images = _get_existing_images()
+    est_secs = len(prompts) * 45
     if len(existing_images) < len(prompts):
-        pipeline_status.update("Image Generation", 5, f"Generating {len(prompts)} images...", 60)
+        pipeline_status.update("Image Generation", 5,
+                                f"Generating {len(prompts)} images...", 60)
         print(f"[ Step 5 / 5 ] — Image generation "
-              f"({len(prompts)} images at ~45s each = "
-              f"~{len(prompts) * 45 // 60}min {len(prompts) * 45 % 60}s)")
-        image_paths = generate_images(prompts)
+              f"({len(prompts)} images, ~{est_secs // 60}m {est_secs % 60}s)")
+        image_paths = generate_images(prompts, mode=mode)
     else:
         print(f"[ Step 5 / 5 ] — Images (found {len(existing_images)} existing, skipping)")
         image_paths = existing_images
@@ -168,13 +172,13 @@ def run_pipeline(topic: str, auto: bool = False):
     pipeline_status.update("Assembly", 5, "Assembling final video...", 90)
     print("\n[ Final ] — Assembling video")
     checkpoint("All assets ready — review before final assembly", auto)
-    
 
     output_path = assemble_video(
         image_paths=image_paths,
         audio_path=AUDIO_FILE,
         timestamps=timestamps,
         topic=topic,
+        mode=mode,
     )
 
     # --------------------------------------------------------
@@ -190,7 +194,6 @@ def run_pipeline(topic: str, auto: bool = False):
     print(f"  Time   : {mins}m {secs}s")
     print(f"{'='*60}\n")
 
-    # Ask to clean up temp files
     if not auto:
         resp = input("  Clean up temp files? (y/n): ").strip().lower()
         if resp == "y":
@@ -198,7 +201,6 @@ def run_pipeline(topic: str, auto: bool = False):
     else:
         cleanup_temp()
 
-    # Clear pipeline state
     if os.path.exists(STATE_FILE):
         os.remove(STATE_FILE)
 
@@ -223,23 +225,29 @@ def _get_existing_images() -> list[str]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate a YouTube history video from a single topic prompt."
+        description="Generate a YouTube video from a single topic prompt."
     )
     parser.add_argument(
         "topic",
         type=str,
-        help='Video topic, e.g. "The history of Scarborough, Toronto"'
+        help='Video topic, e.g. "The Avro Arrow"'
     )
     parser.add_argument(
         "--auto",
         action="store_true",
         help="Run fully automated with no checkpoints"
     )
+    parser.add_argument(
+        "--mode",
+        choices=["long", "short"],
+        default="long",
+        help="Video mode: long (YouTube) or short (YouTube Shorts)"
+    )
 
     args = parser.parse_args()
 
     try:
-        run_pipeline(topic=args.topic, auto=args.auto)
+        run_pipeline(topic=args.topic, auto=args.auto, mode=args.mode)
     except KeyboardInterrupt:
         print("\n\n⚠️  Pipeline interrupted by user.")
         print("   Temp files preserved — re-run with the same topic to resume.")

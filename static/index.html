@@ -12,6 +12,7 @@
     --border:    #222222;
     --accent:    #e8ff00;
     --accent2:   #ff4444;
+    --accent3:   #ff6ec7;
     --text:      #e8e8e8;
     --muted:     #555555;
     --success:   #00ff88;
@@ -26,7 +27,6 @@
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 14px;
     min-height: 100vh;
-    padding: 0;
   }
 
   /* Scanline overlay */
@@ -35,11 +35,8 @@
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
     background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0,0,0,0.03) 2px,
-      rgba(0,0,0,0.03) 4px
+      0deg, transparent, transparent 2px,
+      rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px
     );
     pointer-events: none;
     z-index: 9999;
@@ -59,6 +56,7 @@
     letter-spacing: 3px;
     color: var(--accent);
     line-height: 1;
+    animation: flicker 8s infinite;
   }
 
   header span {
@@ -112,12 +110,54 @@
     transition: border-color 0.2s;
   }
 
-  .input-row input:focus {
-    border-color: var(--accent);
+  .input-row input:focus { border-color: var(--accent); }
+  .input-row input::placeholder { color: var(--muted); }
+
+  /* Mode toggle */
+  .mode-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 12px;
   }
 
-  .input-row input::placeholder {
+  .mode-toggle {
+    display: flex;
+    gap: 0;
+  }
+
+  .mode-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
     color: var(--muted);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 15px;
+    letter-spacing: 2px;
+    padding: 7px 18px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .mode-btn:first-child { border-right: none; }
+
+  .mode-btn.active.long {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+  }
+
+  .mode-btn.active.short {
+    background: var(--accent3);
+    border-color: var(--accent3);
+    color: #000;
+  }
+
+  .mode-hint {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1px;
   }
 
   .btn {
@@ -143,7 +183,7 @@
     padding: 6px 14px;
   }
 
-  /* ---- Status panel ---- */
+  /* ---- Status sidebar ---- */
   .status-panel {
     grid-column: 2;
     grid-row: 1 / 3;
@@ -178,12 +218,7 @@
     padding: 40px 0;
   }
 
-  .current-topic {
-    font-size: 15px;
-    font-weight: 500;
-    line-height: 1.4;
-    color: var(--text);
-  }
+  .current-topic { font-size: 15px; font-weight: 500; line-height: 1.4; }
 
   .step-label {
     font-family: 'IBM Plex Mono', monospace;
@@ -212,7 +247,6 @@
     transition: width 0.5s ease;
   }
 
-  /* Animated pulse when running */
   .progress-bar.running::after {
     content: '';
     position: absolute;
@@ -220,11 +254,6 @@
     width: 40%;
     background: linear-gradient(90deg, transparent, rgba(232,255,0,0.4), transparent);
     animation: sweep 1.5s linear infinite;
-  }
-
-  @keyframes sweep {
-    from { left: -40%; }
-    to   { left: 140%; }
   }
 
   .log-box {
@@ -240,14 +269,9 @@
     flex-shrink: 0;
   }
 
-  .log-box .log-line { color: #888; }
-  .log-box .log-line.recent { color: var(--text); }
-
-  .elapsed {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px;
-    color: var(--muted);
-  }
+  .log-line { color: #888; }
+  .log-line.recent { color: var(--text); }
+  .elapsed { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); }
 
   /* ---- Queue + Videos ---- */
   .main-content {
@@ -269,11 +293,7 @@
     margin-bottom: 14px;
   }
 
-  .queue-list, .video-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
+  .queue-list, .video-list { display: flex; flex-direction: column; gap: 6px; }
 
   .queue-item {
     background: var(--surface);
@@ -292,11 +312,7 @@
     text-align: center;
   }
 
-  .queue-item .topic {
-    flex: 1;
-    font-size: 14px;
-    line-height: 1.3;
-  }
+  .queue-item .topic { flex: 1; font-size: 14px; line-height: 1.3; }
 
   .badge {
     font-family: 'IBM Plex Mono', monospace;
@@ -310,6 +326,8 @@
   .badge.running { background: var(--accent); color: #000; }
   .badge.done    { background: var(--success); color: #000; }
   .badge.failed  { background: var(--accent2); color: #fff; }
+  .badge.short-badge { background: var(--accent3); color: #000; font-size: 9px; padding: 2px 6px; }
+  .badge.long-badge  { background: var(--border); color: var(--muted); font-size: 9px; padding: 2px 6px; }
 
   .video-item {
     background: var(--surface);
@@ -330,12 +348,7 @@
     white-space: nowrap;
   }
 
-  .video-item .meta {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
-    color: var(--muted);
-    white-space: nowrap;
-  }
+  .video-item .meta { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--muted); white-space: nowrap; }
 
   .download-btn {
     background: transparent;
@@ -351,31 +364,10 @@
     white-space: nowrap;
   }
 
-  .download-btn:hover {
-    border-color: var(--accent);
-    background: rgba(232,255,0,0.06);
-  }
+  .download-btn:hover { border-color: var(--accent); background: rgba(232,255,0,0.06); }
 
-  .empty-state {
-    color: var(--muted);
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    padding: 16px 0;
-  }
+  .empty-state { color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 16px 0; }
 
-  /* Flicker on load */
-  @keyframes flicker {
-    0%, 100% { opacity: 1; }
-    92%       { opacity: 1; }
-    93%       { opacity: 0.8; }
-    94%       { opacity: 1; }
-    96%       { opacity: 0.9; }
-    97%       { opacity: 1; }
-  }
-
-  header h1 { animation: flicker 8s infinite; }
-
-  /* Toast */
   .toast {
     position: fixed;
     bottom: 24px;
@@ -392,6 +384,15 @@
   }
 
   .toast.show { transform: translateX(-50%) translateY(0); }
+
+  @keyframes flicker {
+    0%, 100% { opacity: 1; } 92% { opacity: 1; } 93% { opacity: 0.8; }
+    94% { opacity: 1; } 96% { opacity: 0.9; } 97% { opacity: 1; }
+  }
+
+  @keyframes sweep {
+    from { left: -40%; } to { left: 140%; }
+  }
 </style>
 </head>
 <body>
@@ -412,6 +413,13 @@
         onkeydown="if(event.key==='Enter') submitTopic()">
       <button class="btn" onclick="submitTopic()">QUEUE IT</button>
     </div>
+    <div class="mode-row">
+      <div class="mode-toggle">
+        <button class="mode-btn active long" id="btnLong" onclick="setMode('long')">🎬 LONG FORM</button>
+        <button class="mode-btn short" id="btnShort" onclick="setMode('short')">📱 SHORTS</button>
+      </div>
+      <div class="mode-hint" id="modeHint">YouTube long form — 9 to 12 minutes</div>
+    </div>
   </div>
 
   <!-- Status sidebar -->
@@ -425,7 +433,6 @@
   <!-- Main content -->
   <div class="main-content">
 
-    <!-- Queue -->
     <div>
       <div class="section-title">Queue</div>
       <div class="queue-list" id="queueList">
@@ -433,7 +440,6 @@
       </div>
     </div>
 
-    <!-- Completed videos -->
     <div>
       <div class="section-title">Completed Videos</div>
       <div class="video-list" id="videoList">
@@ -448,7 +454,23 @@
 <div class="toast" id="toast"></div>
 
 <script>
-  let lastStatus = null;
+  let lastStatus  = null;
+  let currentMode = 'long';
+
+  // ---- Mode toggle ----
+  function setMode(mode) {
+    currentMode = mode;
+    const btnLong  = document.getElementById('btnLong');
+    const btnShort = document.getElementById('btnShort');
+    const hint     = document.getElementById('modeHint');
+
+    btnLong.className  = 'mode-btn long'  + (mode === 'long'  ? ' active' : '');
+    btnShort.className = 'mode-btn short' + (mode === 'short' ? ' active' : '');
+
+    hint.textContent = mode === 'short'
+      ? 'YouTube Shorts — 45 to 60 seconds'
+      : 'YouTube long form — 9 to 12 minutes';
+  }
 
   // ---- Submit topic ----
   async function submitTopic() {
@@ -460,11 +482,12 @@
       const res = await fetch('/queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic })
+        body: JSON.stringify({ topic, mode: currentMode })
       });
       const data = await res.json();
       input.value = '';
-      showToast(`Added to queue: position ${data.position}`);
+      const modeLabel = currentMode === 'short' ? '📱 Short' : '🎬 Long';
+      showToast(`[${modeLabel}] Added at position ${data.position}`);
       refreshQueue();
     } catch (e) {
       showToast('Failed to add topic');
@@ -485,7 +508,7 @@
       const res  = await fetch('/queue');
       const data = await res.json();
 
-      const queueEl = document.getElementById('queueList');
+      const queueEl  = document.getElementById('queueList');
       const allItems = [
         ...data.queue.map((item, i) => ({ ...item, pos: i + 1 })),
         ...data.history
@@ -498,6 +521,9 @@
           <div class="queue-item">
             <div class="pos">${item.pos || '—'}</div>
             <div class="topic">${escHtml(item.topic)}</div>
+            <span class="badge ${item.mode === 'short' ? 'short-badge' : 'long-badge'}">
+              ${item.mode === 'short' ? '📱 SHORT' : '🎬 LONG'}
+            </span>
             <span class="badge ${item.status}">${item.status}</span>
             ${item.status === 'queued'
               ? `<button class="btn danger" onclick="removeFromQueue('${item.id}')">✕</button>`
@@ -534,8 +560,7 @@
     try {
       const res    = await fetch('/status');
       const status = await res.json();
-
-      const el = document.getElementById('statusContent');
+      const el     = document.getElementById('statusContent');
 
       if (!status.running && !status.topic) {
         el.innerHTML = '<div class="status-idle">— idle —</div>';
@@ -552,7 +577,6 @@
 
       const progressPct = status.progress || 0;
       const isRunning   = status.running;
-      const isError     = !!status.error;
 
       el.innerHTML = `
         <div class="current-topic">${escHtml(status.topic)}</div>
@@ -563,13 +587,12 @@
         <div class="detail-label">${escHtml(status.detail || '')}</div>
         <div class="elapsed">Elapsed: ${elapsed}</div>
         <div class="log-box">${logs}</div>
-        ${isError ? `<div class="badge failed">Error: ${escHtml(status.error)}</div>` : ''}
+        ${status.error ? `<div class="badge failed">Error: ${escHtml(status.error)}</div>` : ''}
         ${!isRunning && status.output_file
           ? `<a class="download-btn" href="/download/${encodeURIComponent(status.output_file.split(/[\\/]/).pop())}" download>↓ DOWNLOAD LATEST</a>`
           : ''}
       `;
 
-      // Detect completion to refresh video list
       if (!isRunning && lastStatus && lastStatus.running) {
         refreshVideos();
         refreshQueue();
@@ -597,8 +620,8 @@
   refreshVideos();
   pollStatus();
 
-  setInterval(pollStatus,   3000);
-  setInterval(refreshQueue, 5000);
+  setInterval(pollStatus,    3000);
+  setInterval(refreshQueue,  5000);
   setInterval(refreshVideos, 10000);
 </script>
 </body>
