@@ -13,6 +13,7 @@
     --accent:    #e8ff00;
     --accent2:   #ff4444;
     --accent3:   #ff6ec7;
+    --accent4:   #00cfff;
     --text:      #e8e8e8;
     --muted:     #555555;
     --success:   #00ff88;
@@ -29,7 +30,6 @@
     min-height: 100vh;
   }
 
-  /* Scanline overlay */
   body::before {
     content: '';
     position: fixed;
@@ -113,12 +113,27 @@
   .input-row input:focus { border-color: var(--accent); }
   .input-row input::placeholder { color: var(--muted); }
 
-  /* Mode toggle */
-  .mode-row {
+  /* Toggle rows */
+  .toggles-row {
     display: flex;
     align-items: center;
-    gap: 14px;
-    margin-top: 12px;
+    gap: 24px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+
+  .toggle-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .toggle-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
   }
 
   .mode-toggle {
@@ -141,23 +156,23 @@
 
   .mode-btn:first-child { border-right: none; }
 
-  .mode-btn.active.long {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #000;
-  }
+  /* Mode active states */
+  .mode-btn.active.long  { background: var(--accent);  border-color: var(--accent);  color: #000; }
+  .mode-btn.active.short { background: var(--accent3); border-color: var(--accent3); color: #000; }
 
-  .mode-btn.active.short {
-    background: var(--accent3);
-    border-color: var(--accent3);
-    color: #000;
-  }
+  /* Style active states */
+  .style-btn:first-child { border-right: none; }
+  .style-btn { font-size: 14px; }
+  .style-btn.active.serious { background: var(--accent);  border-color: var(--accent);  color: #000; }
+  .style-btn.active.funny   { background: var(--accent4); border-color: var(--accent4); color: #000; }
 
-  .mode-hint {
+  .toggle-hint {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 10px;
     color: var(--muted);
     letter-spacing: 1px;
+    align-self: flex-end;
+    padding-bottom: 2px;
   }
 
   .btn {
@@ -219,19 +234,8 @@
   }
 
   .current-topic { font-size: 15px; font-weight: 500; line-height: 1.4; }
-
-  .step-label {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px;
-    color: var(--accent);
-    letter-spacing: 1px;
-  }
-
-  .detail-label {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px;
-    color: var(--muted);
-  }
+  .step-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--accent); letter-spacing: 1px; }
+  .detail-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); }
 
   .progress-bar {
     width: 100%;
@@ -241,11 +245,7 @@
     overflow: hidden;
   }
 
-  .progress-fill {
-    height: 100%;
-    background: var(--accent);
-    transition: width 0.5s ease;
-  }
+  .progress-fill { height: 100%; background: var(--accent); transition: width 0.5s ease; }
 
   .progress-bar.running::after {
     content: '';
@@ -301,7 +301,7 @@
     padding: 12px 16px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
   }
 
   .queue-item .pos {
@@ -326,8 +326,11 @@
   .badge.running { background: var(--accent); color: #000; }
   .badge.done    { background: var(--success); color: #000; }
   .badge.failed  { background: var(--accent2); color: #fff; }
-  .badge.short-badge { background: var(--accent3); color: #000; font-size: 9px; padding: 2px 6px; }
-  .badge.long-badge  { background: var(--border); color: var(--muted); font-size: 9px; padding: 2px 6px; }
+
+  .badge.short-badge   { background: var(--accent3); color: #000; font-size: 9px; padding: 2px 6px; }
+  .badge.long-badge    { background: var(--border);  color: var(--muted); font-size: 9px; padding: 2px 6px; }
+  .badge.serious-badge { background: var(--accent);  color: #000; font-size: 9px; padding: 2px 6px; }
+  .badge.funny-badge   { background: var(--accent4); color: #000; font-size: 9px; padding: 2px 6px; }
 
   .video-item {
     background: var(--surface);
@@ -409,16 +412,33 @@
     <label>New Video Topic</label>
     <div class="input-row">
       <input type="text" id="topicInput"
-        placeholder="e.g. The Avro Arrow — how Canada destroyed its greatest achievement"
+        placeholder='e.g. "Why we self-sabotage" or "The time a beaver caused an international incident"'
         onkeydown="if(event.key==='Enter') submitTopic()">
       <button class="btn" onclick="submitTopic()">QUEUE IT</button>
     </div>
-    <div class="mode-row">
-      <div class="mode-toggle">
-        <button class="mode-btn active long" id="btnLong" onclick="setMode('long')">🎬 LONG FORM</button>
-        <button class="mode-btn short" id="btnShort" onclick="setMode('short')">📱 SHORTS</button>
+
+    <div class="toggles-row">
+
+      <!-- Mode toggle -->
+      <div class="toggle-group">
+        <div class="toggle-label">Format</div>
+        <div class="mode-toggle">
+          <button class="mode-btn active long" id="btnLong"  onclick="setMode('long')">🎬 LONG</button>
+          <button class="mode-btn short"       id="btnShort" onclick="setMode('short')">📱 SHORT</button>
+        </div>
       </div>
-      <div class="mode-hint" id="modeHint">YouTube long form — 9 to 12 minutes</div>
+
+      <!-- Style toggle -->
+      <div class="toggle-group">
+        <div class="toggle-label">Style</div>
+        <div class="mode-toggle">
+          <button class="mode-btn style-btn active serious" id="btnSerious" onclick="setStyle('serious')">🎙 SERIOUS</button>
+          <button class="mode-btn style-btn funny"          id="btnFunny"   onclick="setStyle('funny')">😄 FUNNY</button>
+        </div>
+      </div>
+
+      <div class="toggle-hint" id="comboHint">Long-form · Serious documentary</div>
+
     </div>
   </div>
 
@@ -454,22 +474,36 @@
 <div class="toast" id="toast"></div>
 
 <script>
-  let lastStatus  = null;
-  let currentMode = 'long';
+  let lastStatus   = null;
+  let currentMode  = 'long';
+  let currentStyle = 'serious';
+
+  const COMBO_HINTS = {
+    'long-serious':  'Long-form · Serious documentary',
+    'long-funny':    'Long-form · Upbeat & humorous',
+    'short-serious': 'Shorts · Sharp & impactful',
+    'short-funny':   'Shorts · Fast & funny',
+  };
 
   // ---- Mode toggle ----
   function setMode(mode) {
     currentMode = mode;
-    const btnLong  = document.getElementById('btnLong');
-    const btnShort = document.getElementById('btnShort');
-    const hint     = document.getElementById('modeHint');
+    document.getElementById('btnLong').className  = 'mode-btn long'  + (mode === 'long'  ? ' active' : '');
+    document.getElementById('btnShort').className = 'mode-btn short' + (mode === 'short' ? ' active' : '');
+    updateHint();
+  }
 
-    btnLong.className  = 'mode-btn long'  + (mode === 'long'  ? ' active' : '');
-    btnShort.className = 'mode-btn short' + (mode === 'short' ? ' active' : '');
+  // ---- Style toggle ----
+  function setStyle(style) {
+    currentStyle = style;
+    document.getElementById('btnSerious').className = 'mode-btn style-btn serious' + (style === 'serious' ? ' active' : '');
+    document.getElementById('btnFunny').className   = 'mode-btn style-btn funny'   + (style === 'funny'   ? ' active' : '');
+    updateHint();
+  }
 
-    hint.textContent = mode === 'short'
-      ? 'YouTube Shorts — 45 to 60 seconds'
-      : 'YouTube long form — 9 to 12 minutes';
+  function updateHint() {
+    document.getElementById('comboHint').textContent =
+      COMBO_HINTS[`${currentMode}-${currentStyle}`] || '';
   }
 
   // ---- Submit topic ----
@@ -482,12 +516,13 @@
       const res = await fetch('/queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, mode: currentMode })
+        body: JSON.stringify({ topic, mode: currentMode, style: currentStyle })
       });
       const data = await res.json();
       input.value = '';
-      const modeLabel = currentMode === 'short' ? '📱 Short' : '🎬 Long';
-      showToast(`[${modeLabel}] Added at position ${data.position}`);
+      const modeLabel  = currentMode  === 'short'   ? '📱' : '🎬';
+      const styleLabel = currentStyle === 'funny'   ? '😄' : '🎙';
+      showToast(`${modeLabel}${styleLabel} Added at position ${data.position}`);
       refreshQueue();
     } catch (e) {
       showToast('Failed to add topic');
@@ -523,6 +558,9 @@
             <div class="topic">${escHtml(item.topic)}</div>
             <span class="badge ${item.mode === 'short' ? 'short-badge' : 'long-badge'}">
               ${item.mode === 'short' ? '📱 SHORT' : '🎬 LONG'}
+            </span>
+            <span class="badge ${item.style === 'funny' ? 'funny-badge' : 'serious-badge'}">
+              ${item.style === 'funny' ? '😄 FUNNY' : '🎙 SERIOUS'}
             </span>
             <span class="badge ${item.status}">${item.status}</span>
             ${item.status === 'queued'

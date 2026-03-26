@@ -10,10 +10,10 @@ import subprocess
 import requests
 from config import (
     OLLAMA_MODEL, OLLAMA_BASE_URL,
-    SCRIPT_SYSTEM_PROMPT_LONG, SCRIPT_SYSTEM_PROMPT_SHORT,
-    IMAGE_PROMPT_SYSTEM,
+    SCRIPT_SYSTEM_PROMPTS,
+    IMAGE_PROMPT_SYSTEMS,
+    TARGET_LENGTHS,
     SCRIPT_FILE,
-    TARGET_VIDEO_LENGTH_LONG, TARGET_VIDEO_LENGTH_SHORT,
 )
 
 
@@ -58,25 +58,20 @@ def generate_script(
     topic: str,
     auto: bool = False,
     research: str = "",
-    mode: str = "long"
+    mode: str = "long",
+    style: str = "serious",
 ) -> str:
     """
     Generate a narration script for the given topic.
-    mode: "long" for full YouTube video, "short" for YouTube Shorts.
-    If research is provided, it is injected as factual grounding.
-    If auto is False, opens the script in Notepad for review/editing.
-    Returns the final script text.
+    mode:  "long" | "short"
+    style: "serious" | "funny"
     """
-    print(f"✍️  Generating script for: '{topic}' [{mode}]...")
+    print(f"✍️  Generating script for: '{topic}' [{style} / {mode}]...")
 
-    if mode == "short":
-        system = SCRIPT_SYSTEM_PROMPT_SHORT.format(
-            target_length=TARGET_VIDEO_LENGTH_SHORT
-        )
-    else:
-        system = SCRIPT_SYSTEM_PROMPT_LONG.format(
-            target_length=TARGET_VIDEO_LENGTH_LONG
-        )
+    # Pull the right system prompt and target length
+    system_template = SCRIPT_SYSTEM_PROMPTS[style][mode]
+    target_length   = TARGET_LENGTHS[style][mode]
+    system          = system_template.format(target_length=target_length)
 
     if research:
         user = (
@@ -107,30 +102,33 @@ def generate_script(
     return script
 
 
-def generate_image_prompts(sentences: list[str], auto: bool = False) -> list[str]:
+def generate_image_prompts(
+    sentences: list[str],
+    auto: bool = False,
+    style: str = "serious",
+) -> list[str]:
     """
     Generate one image generation prompt per sentence.
-    Processes in batches to avoid JSON errors on long scripts.
-    If auto is False, displays prompts for review before continuing.
+    style: "serious" | "funny"
     """
-    BATCH_SIZE = 10
+    BATCH_SIZE  = 10
     all_prompts = []
-    batches = [sentences[i:i+BATCH_SIZE] for i in range(0, len(sentences), BATCH_SIZE)]
+    batches     = [sentences[i:i+BATCH_SIZE] for i in range(0, len(sentences), BATCH_SIZE)]
+    system      = IMAGE_PROMPT_SYSTEMS[style]
 
-    print(f"🎨 Generating {len(sentences)} image prompts in {len(batches)} batches...")
+    print(f"🎨 Generating {len(sentences)} image prompts [{style}] in {len(batches)} batches...")
 
     for batch_num, batch in enumerate(batches, 1):
         print(f"   Batch {batch_num}/{len(batches)}...")
         numbered = "\n".join(f"{i+1}. {s}" for i, s in enumerate(batch))
         user = f"Generate one image prompt for each of these narration sentences:\n\n{numbered}"
 
-        raw     = _chat(IMAGE_PROMPT_SYSTEM, user)
+        raw     = _chat(system, user)
         cleaned = re.sub(r"```json|```", "", raw).strip()
 
         try:
             prompts = json.loads(cleaned)
         except json.JSONDecodeError:
-            # Model returned one array per line instead of one big array
             try:
                 prompts = []
                 for line in cleaned.splitlines():
@@ -144,11 +142,11 @@ def generate_image_prompts(sentences: list[str], auto: bool = False) -> list[str
                         prompts.append(parsed)
             except json.JSONDecodeError:
                 print(f"   ⚠️  Batch {batch_num} failed to parse, using fallback prompts")
-                prompts = ["A documentary-style historical scene, cinematic lighting, photorealistic."] * len(batch)
+                prompts = [_fallback_prompt(style)] * len(batch)
 
-        # Ensure correct count for this batch
+        # Ensure correct count
         while len(prompts) < len(batch):
-            prompts.append("A documentary-style historical scene, cinematic lighting, photorealistic.")
+            prompts.append(_fallback_prompt(style))
         prompts = prompts[:len(batch)]
 
         all_prompts.extend(prompts)
@@ -158,7 +156,7 @@ def generate_image_prompts(sentences: list[str], auto: bool = False) -> list[str
     # Checkpoint — show prompts for review
     if not auto:
         print("\n" + "="*60)
-        print("IMAGE PROMPTS — review before image generation begins:")
+        print(f"IMAGE PROMPTS [{style.upper()}] — review before image generation begins:")
         print("="*60)
         for i, (sentence, prompt) in enumerate(zip(sentences, all_prompts), 1):
             print(f"\n[{i}] Narration : {sentence[:80]}")
@@ -169,19 +167,32 @@ def generate_image_prompts(sentences: list[str], auto: bool = False) -> list[str
     return all_prompts
 
 
+def _fallback_prompt(style: str) -> str:
+    """Style-appropriate fallback for when the LLM fails to parse a batch."""
+    if style == "funny":
+        return (
+            "A confused-looking generic person in a mundane setting, "
+            "deadpan composition, bright flat lighting, photorealistic."
+        )
+    return (
+        "A thoughtful scene with natural lighting, cinematic composition, "
+        "shallow depth of field, photorealistic."
+    )
+
+
 # ------------------------------------------------------------
 #  Entry point for isolated testing
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
-    test_topic = "The Avro Arrow — how Canada built the world's most advanced fighter jet"
+    test_topic = "The Stanford Prison Experiment"
 
-    # Test long form
-    script    = generate_script(test_topic, auto=False, mode="long")
-    sentences = split_into_sentences(script)
-    prompts   = generate_image_prompts(sentences, auto=False)
-
-    print(f"\n✅ LLM module test complete.")
-    print(f"   Script   : {len(script.split())} words")
-    print(f"   Sentences: {len(sentences)}")
-    print(f"   Prompts  : {len(prompts)}")
+    for style in ("serious", "funny"):
+        print(f"\n{'='*60}")
+        print(f"Testing style: {style.upper()}")
+        print("="*60)
+        script    = generate_script(test_topic, auto=True, mode="long", style=style)
+        sentences = split_into_sentences(script)
+        prompts   = generate_image_prompts(sentences[:3], auto=True, style=style)
+        print(f"Script: {len(script.split())} words, {len(sentences)} sentences")
+        print(f"Sample prompt: {prompts[0]}")

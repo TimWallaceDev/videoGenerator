@@ -1,9 +1,11 @@
 # ============================================================
 #  VIDEO PIPELINE — MAIN ORCHESTRATOR
 #  Usage:
-#    python main.py "The history of Scarborough, Toronto"
+#    python main.py "The Stanford Prison Experiment"
 #    python main.py "The Avro Arrow" --auto
 #    python main.py "Crazy history fact" --auto --mode short
+#    python main.py "Why cats are broken" --auto --style funny
+#    python main.py "A weird fact" --auto --mode short --style funny
 # ============================================================
 
 import os
@@ -13,7 +15,6 @@ import argparse
 import traceback
 from datetime import datetime
 
-# Pipeline modules
 from llm        import generate_script, generate_image_prompts, split_into_sentences
 from tts        import generate_audio
 from transcribe import transcribe_audio
@@ -29,6 +30,7 @@ from config import (
     TIMESTAMPS_FILE,
     AUDIO_FILE,
     VIDEO_CONFIGS,
+    VIDEO_STYLE,
 )
 
 
@@ -37,7 +39,6 @@ from config import (
 # ------------------------------------------------------------
 
 def checkpoint(label: str, auto: bool):
-    """Pause for human review unless auto mode is on."""
     if auto:
         return
     print(f"\n{'='*60}")
@@ -47,7 +48,7 @@ def checkpoint(label: str, auto: bool):
 
 
 # ------------------------------------------------------------
-#  Pipeline state — allows resuming if something fails
+#  Pipeline state
 # ------------------------------------------------------------
 
 STATE_FILE = os.path.join(TEMP_DIR, "pipeline_state.json")
@@ -68,10 +69,16 @@ def load_state() -> dict:
 #  Main pipeline
 # ------------------------------------------------------------
 
-def run_pipeline(topic: str, auto: bool = False, mode: str = "long"):
+def run_pipeline(
+    topic: str,
+    auto: bool = False,
+    mode: str = "long",
+    style: str = "serious",
+):
     """
     Full pipeline from topic string to finished .mp4.
-    mode: "long" for YouTube long form, "short" for YouTube Shorts.
+    mode:  "long" | "short"
+    style: "serious" | "funny"
     """
     cfg        = VIDEO_CONFIGS[mode]
     start_time = datetime.now()
@@ -81,10 +88,10 @@ def run_pipeline(topic: str, auto: bool = False, mode: str = "long"):
     print(f"  Topic : {topic}")
     print(f"  Mode  : {'AUTO' if auto else 'MANUAL'} | {mode.upper()}"
           f" ({cfg['width']}x{cfg['height']})")
+    print(f"  Style : {style.upper()}")
     print(f"  Time  : {start_time.strftime('%H:%M:%S')}")
     print(f"{'='*60}\n")
 
-    # Ensure output dirs exist
     os.makedirs(TEMP_DIR,   exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(IMAGES_DIR, exist_ok=True)
@@ -98,12 +105,16 @@ def run_pipeline(topic: str, auto: bool = False, mode: str = "long"):
         pipeline_status.update("Research + Script", 1, "Researching topic...", 5)
         print("[ Step 1 / 5 ] — Research + Script generation")
         research = research_topic(topic)
-        script = generate_script(topic, auto=auto, research=research, mode=mode)
+        script = generate_script(
+            topic, auto=auto, research=research, mode=mode, style=style
+        )
         state["script"] = script
+        state["style"]  = style   # persist so resume uses same style
         save_state(state)
     else:
         print("[ Step 1 / 5 ] — Script (loaded from previous run)")
         script = state["script"]
+        style  = state.get("style", style)  # honour original style on resume
 
     sentences = split_into_sentences(script)
     print(f"             {len(script.split())} words, {len(sentences)} sentences\n")
@@ -114,10 +125,8 @@ def run_pipeline(topic: str, auto: bool = False, mode: str = "long"):
     if "prompts" not in state:
         pipeline_status.update("Image Prompts", 2, "Generating prompts...", 25)
         print("[ Step 2 / 5 ] — Image prompt generation")
-
         checkpoint("Review script before generating image prompts", auto)
-
-        prompts = generate_image_prompts(sentences, auto=auto)
+        prompts = generate_image_prompts(sentences, auto=auto, style=style)
         state["prompts"] = prompts
         save_state(state)
     else:
@@ -125,7 +134,6 @@ def run_pipeline(topic: str, auto: bool = False, mode: str = "long"):
         prompts = state["prompts"]
 
     print(f"             {len(prompts)} prompts\n")
-
     checkpoint("Review image prompts before starting image generation", auto)
 
     # --------------------------------------------------------
@@ -208,7 +216,6 @@ def run_pipeline(topic: str, auto: bool = False, mode: str = "long"):
 
 
 def _get_existing_images() -> list[str]:
-    """Return sorted list of images already in IMAGES_DIR."""
     if not os.path.exists(IMAGES_DIR):
         return []
     files = [
@@ -227,27 +234,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate a YouTube video from a single topic prompt."
     )
-    parser.add_argument(
-        "topic",
-        type=str,
-        help='Video topic, e.g. "The Avro Arrow"'
-    )
-    parser.add_argument(
-        "--auto",
-        action="store_true",
-        help="Run fully automated with no checkpoints"
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["long", "short"],
-        default="long",
-        help="Video mode: long (YouTube) or short (YouTube Shorts)"
-    )
+    parser.add_argument("topic", type=str, help='e.g. "The Avro Arrow"')
+    parser.add_argument("--auto",  action="store_true", help="No checkpoints")
+    parser.add_argument("--mode",  choices=["long", "short"],  default="long")
+    parser.add_argument("--style", choices=["serious", "funny"], default=VIDEO_STYLE)
 
     args = parser.parse_args()
 
     try:
-        run_pipeline(topic=args.topic, auto=args.auto, mode=args.mode)
+        run_pipeline(
+            topic=args.topic,
+            auto=args.auto,
+            mode=args.mode,
+            style=args.style,
+        )
     except KeyboardInterrupt:
         print("\n\n⚠️  Pipeline interrupted by user.")
         print("   Temp files preserved — re-run with the same topic to resume.")

@@ -1,0 +1,369 @@
+# ============================================================
+#  VIDEO PIPELINE — PROJECT HANDOFF DOCUMENT
+#  Everything the next Claude instance needs to continue
+#  this project intelligently and without repeating history.
+# ============================================================
+
+# ============================================================
+#  WHAT THIS PROJECT IS
+# ============================================================
+
+An automated YouTube video production pipeline built in Python.
+A single topic prompt produces a fully narrated, illustrated MP4
+video — completely unattended. Also supports YouTube Shorts.
+
+The user is T, based in Greater Toronto Area. The channel covers
+Canadian/GTA history with a dramatic documentary style. T also
+has a friend who uses the pipeline remotely via Tailscale.
+
+Stack:
+  - Ollama (Qwen 2.5 14B) — script writing + image prompt generation
+  - SearXNG (Docker, port 8080) — local web search for research
+  - Chatterbox TTS (ComfyUI workflow) — voice cloning
+  - Faster-Whisper (medium, CUDA) — transcription + timestamps
+  - Qwen Image (ComfyUI workflow, Wan2.1) — image generation
+  - ffmpeg — final video assembly with Ken Burns zoom effect
+  - FastAPI + uvicorn — web server frontend
+  - Tailscale — remote access for friend
+
+Hardware: Razer laptop, RTX 4090 mobile, Windows 11, Python 3.10
+
+
+# ============================================================
+#  PROJECT STRUCTURE
+# ============================================================
+
+C:\Users\RAZER\videoGenerator\
+  main.py           — orchestrator, single entry point
+  config.py         — ALL settings, edit this freely
+  llm.py            — script + image prompt generation
+  tts.py            — Chatterbox audio via ComfyUI
+  transcribe.py     — Whisper transcription + timestamps
+  imagegen.py       — Qwen image generation via ComfyUI
+  assemble.py       — ffmpeg assembly with Ken Burns zoom
+  research.py       — SearXNG web research before scripting
+  status.py         — shared pipeline status object for web UI
+  server.py         — FastAPI web server
+  batch.py          — overnight queue processor
+  workflows/
+    chatterbox.json — Chatterbox ComfyUI workflow (API format)
+  static/
+    index.html      — web frontend UI
+  output/           — finished MP4s
+  temp/             — working files, cleared after each run
+    images/         — generated images
+    audio.wav       — TTS audio
+    timestamps.json — sentence-level timestamps
+    words.json      — word-level timestamps (for future captions)
+    script.txt      — generated script
+    pipeline_state.json — resume state if pipeline crashes
+  topics.txt        — batch queue file
+  batch_log.txt     — batch run log
+  README.txt        — full project documentation
+
+
+# ============================================================
+#  HOW TO RUN
+# ============================================================
+
+Prerequisites (must be running):
+  - Ollama:    runs as background service after install
+  - ComfyUI:   started manually in its own terminal
+  - SearXNG:   docker start searxng
+  - ffmpeg:    path hardcoded in config.py (not on PATH)
+
+Single video (manual, with checkpoints):
+  cd C:\Users\RAZER\videoGenerator
+  python main.py "The Avro Arrow"
+
+Single video (fully automated):
+  python main.py "The Avro Arrow" --auto
+
+YouTube Short:
+  python main.py "The Avro Arrow" --auto --mode short
+
+Batch overnight:
+  python batch.py --auto
+
+Web server (for friend on Tailscale):
+  python server.py
+  # Access at http://localhost:8000
+  # Friend accesses at http://[tailscale-ip]:8000
+
+
+# ============================================================
+#  CONFIG.PY — KEY SETTINGS
+# ============================================================
+
+OLLAMA_MODEL        = "qwen2.5:14b"
+FFMPEG              = full path to ffmpeg.exe (hardcoded)
+VIDEO_CONFIGS       = dict with "long" and "short" mode dimensions
+                      long:  1280x720
+                      short: 720x1280
+AUTO_MODE           = False (checkpoints on by default)
+IMAGE_PROMPT_PREFIX = grounding tags for every image prompt
+SCRIPT_SYSTEM_PROMPT_LONG   = full dramatic documentary prompt
+SCRIPT_SYSTEM_PROMPT_SHORT  = punchy 60-second Shorts prompt
+TARGET_VIDEO_LENGTH_LONG    = ~1200-1500 words
+TARGET_VIDEO_LENGTH_SHORT   = ~100-120 words
+CAPTION_STYLE/FONT/SIZE etc = caption settings (not yet active)
+
+ComfyUI node IDs (hardcoded, do not change without re-exporting):
+  Chatterbox: NODE_TTS="1", NODE_SAVE="2", NODE_LOADAUDIO="4"
+  Qwen Image: nodes 3,6,7,8,37,38,39,58,60,66,73 (subgraph expanded)
+
+Voice reference file: "voice sample 2.mp3" in ComfyUI/input/
+  - ElevenLabs synthetic reference, used for voice cloning
+
+
+# ============================================================
+#  PIPELINE FLOW
+# ============================================================
+
+1. research.py   — SearXNG generates 8 queries, fetches results,
+                   LLM synthesises into a research brief (~30s)
+
+2. llm.py        — LLM writes dramatic narration script grounded
+                   in research. Opens in Notepad for review if
+                   not --auto. Then generates one image prompt
+                   per sentence in batches of 10.
+
+3. tts.py        — Script split into ~1000-char chunks (Chatterbox
+                   limit). Each chunk sent to ComfyUI workflow.
+                   Chunks stitched together with ffmpeg.
+                   After completion: ComfyUI VRAM flushed
+                   (unload_models: True).
+
+4. transcribe.py — Faster-Whisper transcribes audio with word
+                   timestamps. Matches timestamps to ORIGINAL
+                   SCRIPT SENTENCES (not Whisper's own splits)
+                   to guarantee sentence count = image count.
+                   Saves both timestamps.json and words.json.
+                   After completion: Whisper model deleted +
+                   torch.cuda.empty_cache().
+
+5. imagegen.py   — One image per prompt sent to ComfyUI Qwen
+                   workflow. Images saved as img_0001.png etc.
+                   After ALL images done: ComfyUI VRAM flushed
+                   (unload_models: True). NOT between images.
+
+6. assemble.py   — ffmpeg builds final video:
+                   - Ken Burns zoompan effect on each image
+                     (random zoom in/out, ZOOM_END=1.1)
+                   - Images scaled 2x before zoom for headroom
+                   - Segment durations from Whisper timestamps
+                   - Audio encoded as AAC 192k
+                   - Output: 1280x720 (long) or 720x1280 (short)
+
+State file (temp/pipeline_state.json) saves script and prompts.
+Re-running same topic resumes from where it crashed.
+
+
+# ============================================================
+#  IMPORTANT TECHNICAL DETAILS
+# ============================================================
+
+COMFYUI API:
+  - Exported workflows use node-list format; API needs dict format
+  - tts.py converts this manually using _build_api_workflow()
+  - imagegen.py hardcodes the expanded subgraph nodes directly
+    (ComfyUI API doesn't support subgraph node types)
+  - WebSocket used to wait for completion; falls back to polling
+    if connection drops (common with long Chatterbox generations)
+  - Free memory endpoint: POST /free with unload_models + free_memory
+
+WHISPER TIMING FIX:
+  - Previously Whisper detected MORE sentences than the script
+    causing images to switch too early
+  - Fix: transcribe.py now takes script_sentences as input and
+    matches each sentence to word timestamps sequentially
+  - Fuzzy matching handles Whisper mishearing numbers
+    (e.g. "1962" vs "nineteen sixty-two")
+  - Fallback to Whisper sentence detection if no script available
+
+FFMPEG PATH:
+  - ffmpeg is NOT on Windows PATH
+  - Full path hardcoded in config.py as FFMPEG variable
+  - Path: C:\Users\RAZER\AppData\Local\Microsoft\WinGet\Packages\
+    Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\
+    ffmpeg-8.1-full_build\bin\ffmpeg.exe
+  - All subprocess calls use FFMPEG variable, not "ffmpeg" string
+
+CHATTERBOX LIMITS:
+  - Hard limit: 4000 tokens (~163 seconds audio)
+  - CHATTERBOX_CHAR_LIMIT = 1000 chars per chunk (conservative)
+  - Was originally 3800, caused CUDA assertion errors
+  - Chunks stitched with ffmpeg concat
+
+IMAGE GENERATION:
+  - Qwen Image uses Lightning LoRA (4 steps, cfg 1.0, euler/simple)
+  - Resolution: 1280x720 (long) or 720x1280 (short)
+  - ModelSamplingAuraFlow shift: 3.1
+  - First image after cold start takes ~500s (model load)
+  - Subsequent images: ~45s each
+  - Timeout set to 600s
+
+SEARXNG:
+  - Docker container named "searxng" on port 8080
+  - JSON format must be enabled in settings.yml
+  - Start: docker start searxng
+  - T had to manually edit /etc/searxng/settings.yml to add
+    "- json" under formats section
+  - Test: curl http://localhost:8080/search?q=test&format=json
+
+
+# ============================================================
+#  WEB FRONTEND (server.py)
+# ============================================================
+
+FastAPI server on port 0.0.0.0:8000 (all interfaces for Tailscale)
+Single HTML file frontend at static/index.html
+
+API endpoints:
+  POST /queue        — add topic + mode to queue
+  GET  /queue        — get current queue + history
+  DELETE /queue/{id} — remove queued item
+  GET  /status       — current pipeline status (polled every 3s)
+  GET  /videos       — list completed MP4s
+  GET  /download/{f} — download a video file
+
+Frontend features:
+  - Long Form / Shorts toggle (yellow = long, pink = short)
+  - Live status sidebar with progress bar + log lines
+  - Queue list with mode badges (🎬 LONG / 📱 SHORT)
+  - Completed videos list with download buttons
+  - Dark theme, Bebas Neue + IBM Plex fonts, scanline overlay
+
+Status updates wired into pipeline:
+  Research+Script: 5%  → Audio: 40-50% → Transcription: 55-59%
+  Image gen: 60-85% (ticks per image) → Assembly: 90% → Done: 100%
+
+server.py imports run_pipeline from main.py and runs it in a
+background thread. Queue is in-memory (lost on restart).
+
+
+# ============================================================
+#  BATCH MODE (batch.py)
+# ============================================================
+
+Reads from topics.txt (one topic per line, # for comments)
+Processes sequentially, logs to batch_log.txt
+Clears temp/ between each video
+--start N flag to resume from topic N after a crash
+Catches exceptions per-video and continues queue
+
+
+# ============================================================
+#  KNOWN ISSUES & WORKAROUNDS
+# ============================================================
+
+1. COMFYUI MEMORY CRASHES
+   Cause: VRAM overflow switching between Chatterbox/Qwen/Whisper
+   Fix applied: explicit /free calls after TTS and image gen,
+   torch.cuda.empty_cache() after Whisper
+   Status: improved but monitor on long batch runs
+
+2. WEBSOCKET DROPS DURING TTS
+   Cause: long Chatterbox generations drop the WS connection
+   Fix applied: try/except with polling fallback in tts.py
+   Status: working reliably
+
+3. SCRIPT LENGTH
+   LLM sometimes writes shorter scripts than target
+   Workaround: TARGET_VIDEO_LENGTH uses explicit word counts
+   with strong instructions ("do not summarize")
+
+4. IMAGE PROMPT QUALITY
+   LLM sometimes returns one JSON array per line instead of
+   one big array — handled by line-by-line parsing fallback
+   Real named places/people sometimes slip through — the
+   IMAGE_PROMPT_SYSTEM prompt has explicit NEVER rules
+
+5. VIDEO PLAYS IN VLC BUT NOT WINDOWS MEDIA PLAYER
+   Normal with AAC-encoded ffmpeg output on Windows
+   YouTube upload works fine
+
+
+# ============================================================
+#  FEATURES BUILT BUT NOT YET ACTIVE
+# ============================================================
+
+CAPTIONS FOR SHORTS:
+  - words.json is being saved by transcribe.py (word timestamps)
+  - CAPTION_STYLE, CAPTION_FONT etc. are in config.py
+  - assemble.py was rolled back after errors
+  - Plan: test drawtext filter in isolation before re-integrating
+  - The caption logic exists in the chat history if needed
+
+QUEUE PERSISTENCE:
+  - Currently queue is lost when server.py restarts
+  - Simple fix: save queue to a JSON file on disk
+  - Not yet implemented
+
+CANCEL RUNNING JOB:
+  - No way to cancel a running pipeline from the UI
+  - Would need a threading.Event() signal passed to pipeline
+
+AUTO YOUTUBE METADATA:
+  - Generate title, description, tags from script via LLM
+  - Would be a natural addition to the end of run_pipeline()
+
+
+# ============================================================
+#  FUTURE ROADMAP (discussed but not built)
+# ============================================================
+
+- Captions for Shorts (next priority, partially built)
+- Queue persistence across server restarts
+- Cancel job from web UI
+- Auto YouTube title/description/tags generation
+- Crossfade between TTS audio chunks (smooth joins)
+- Retry logic for failed image generations
+- Thumbnail generation (separate ComfyUI workflow)
+- Batch mode topics.txt management from web UI
+
+
+# ============================================================
+#  TONE & STYLE NOTES
+# ============================================================
+
+The channel's dramatic style is:
+  - "True crime documentary meets Ken Burns"
+  - Opens in the middle of action, no setup
+  - Story-driven, not fact-driven — people not events
+  - Forbidden phrases: "what most people don't know",
+    "who's really pulling the strings", "the real story",
+    "what nobody talks about", "but here's the thing"
+  - Sentence rhythm varies deliberately — short sentences punch
+  - Each sentence = one complete thought = one image
+
+Image prompts:
+  - NO TEXT of any kind (signs, letters, storefronts)
+  - Cinematographer mindset: light source, angle, depth, mood
+  - Period accurate details
+  - Generic locations only (no named real places)
+  - Prefix: "cinematic documentary photography, 35mm film grain,
+    muted colour grading, natural light, no text, no letters..."
+
+
+# ============================================================
+#  DEPENDENCIES
+# ============================================================
+
+pip install:
+  requests websocket-client faster-whisper
+  fastapi uvicorn python-multipart
+
+Ollama models:
+  ollama pull qwen2.5:14b
+
+ComfyUI models:
+  qwen_image_fp8_e4m3fn.safetensors        (diffusion_models/)
+  qwen_2.5_vl_7b_fp8_scaled.safetensors   (text_encoders/)
+  qwen_image_vae.safetensors              (vae/)
+  Qwen-Image-Lightning-4steps-V1.0.safetensors (loras/)
+
+Docker:
+  docker pull searxng/searxng
+  docker run -d --name searxng -p 8080:8080 searxng/searxng
+  (then enable JSON format in settings.yml)

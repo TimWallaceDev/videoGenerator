@@ -45,7 +45,7 @@ Example: ["query one", "query two", "query three"]"""
 
     user = (
         f"Generate {NUM_QUERIES} targeted search queries to research this topic "
-        f"for a dramatic documentary video:\n\n{topic}"
+        f"for an interesting youtube video:\n\n{topic}"
     )
 
     payload = {
