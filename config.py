@@ -267,8 +267,8 @@ _LENGTH_SERIOUS_LONG = (
 )
 
 _LENGTH_SERIOUS_SHORT = (
-    "45 to 60 seconds of spoken narration — approximately one hundred to one "
-    "hundred and twenty words total. Not a word more. "
+    "20 to 45 seconds of spoken narration — approximately fifty to one "
+    "hundred words total. Not a word more. "
     "This is a single dramatic beat, not a full story. "
     "Write the minimum number of sentences needed to deliver maximum impact."
 )
@@ -283,8 +283,8 @@ _LENGTH_FUNNY_LONG = (
 )
 
 _LENGTH_FUNNY_SHORT = (
-    "40 to 55 seconds of spoken narration — approximately ninety to one hundred "
-    "and ten words total. Punchy and tight. "
+    "20 to 30 seconds of spoken narration — approximately fifty to"
+    "ninety words total. Punchy and tight. "
     "One setup, one payoff, one perfect send-off line."
 )
 

@@ -10,11 +10,9 @@ import threading
 import traceback
 from datetime import datetime
 from collections import deque
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 import uvicorn
 
@@ -23,6 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from main   import run_pipeline
 from status import pipeline_status
 from config import OUTPUT_DIR, BASE_DIR
+import comfyui
 
 app = FastAPI(title="Video Pipeline")
 
@@ -36,14 +35,14 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 
 class QueueItem:
     def __init__(self, topic: str, mode: str = "long", style: str = "serious"):
-        self.id         = str(uuid.uuid4())[:8]
-        self.topic      = topic
-        self.mode       = mode
-        self.style      = style
-        self.status     = "queued"
-        self.added_at   = datetime.now().isoformat()
-        self.output     = None
-        self.error      = None
+        self.id       = str(uuid.uuid4())[:8]
+        self.topic    = topic
+        self.mode     = mode
+        self.style    = style
+        self.status   = "queued"
+        self.added_at = datetime.now().isoformat()
+        self.output   = None
+        self.error    = None
 
     def to_dict(self):
         return {
@@ -74,6 +73,16 @@ def queue_worker():
         if item is None:
             threading.Event().wait(2)
             continue
+
+        # If ComfyUI has gone down between jobs, try to bring it back
+        if not comfyui.is_running():
+            pipeline_status.log("⚠️  ComfyUI not responding — attempting restart...")
+            if not comfyui.restart():
+                item.status = "failed"
+                item.error  = "ComfyUI failed to restart"
+                with queue_lock:
+                    history.insert(0, item)
+                continue
 
         item.status = "running"
         pipeline_status.start(item.topic)
@@ -114,13 +123,22 @@ def start_worker():
 
 class TopicRequest(BaseModel):
     topic: str
-    mode: str  = "long"
+    mode:  str = "long"
     style: str = "serious"
 
 
 @app.on_event("startup")
 def startup():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    # Start ComfyUI if it isn't already running
+    if comfyui.is_running():
+        print("✅ ComfyUI already running — skipping start")
+    else:
+        print("🚀 Starting ComfyUI...")
+        if not comfyui.start():
+            print("⚠️  ComfyUI failed to start — image generation will fail until it's up")
+
     start_worker()
     print(f"\n🌐 Server running on http://0.0.0.0:8000\n")
 
@@ -174,6 +192,19 @@ def get_status():
     return pipeline_status.to_dict()
 
 
+@app.get("/comfyui/status")
+def comfyui_status():
+    """Quick health check endpoint for the frontend to poll."""
+    return {"running": comfyui.is_running()}
+
+
+@app.post("/comfyui/restart")
+def comfyui_restart():
+    """Manual restart endpoint — useful if ComfyUI gets wedged."""
+    success = comfyui.restart()
+    return {"success": success}
+
+
 @app.get("/videos")
 def list_videos():
     if not os.path.exists(OUTPUT_DIR):
@@ -182,8 +213,8 @@ def list_videos():
     videos = []
     for f in sorted(os.listdir(OUTPUT_DIR), reverse=True):
         if f.endswith(".mp4"):
-            path    = os.path.join(OUTPUT_DIR, f)
-            size_mb = os.path.getsize(path) / (1024 * 1024)
+            path     = os.path.join(OUTPUT_DIR, f)
+            size_mb  = os.path.getsize(path) / (1024 * 1024)
             modified = datetime.fromtimestamp(os.path.getmtime(path)).isoformat()
             videos.append({
                 "filename": f,

@@ -3,9 +3,7 @@
 #  Usage:
 #    python main.py "The Stanford Prison Experiment"
 #    python main.py "The Avro Arrow" --auto
-#    python main.py "Crazy history fact" --auto --mode short
-#    python main.py "Why cats are broken" --auto --style funny
-#    python main.py "A weird fact" --auto --mode short --style funny
+#    python main.py "Crazy fact" --auto --mode short --style funny
 # ============================================================
 
 import os
@@ -64,6 +62,10 @@ def load_state() -> dict:
             return json.load(f)
     return {}
 
+def clear_state():
+    if os.path.exists(STATE_FILE):
+        os.remove(STATE_FILE)
+
 
 # ------------------------------------------------------------
 #  Main pipeline
@@ -75,13 +77,13 @@ def run_pipeline(
     mode: str = "long",
     style: str = "serious",
 ):
-    """
-    Full pipeline from topic string to finished .mp4.
-    mode:  "long" | "short"
-    style: "serious" | "funny"
-    """
     cfg        = VIDEO_CONFIGS[mode]
     start_time = datetime.now()
+
+    # Always clear state at the start of a new run.
+    # This prevents the previous video's state from bleeding
+    # into the next topic when running via batch or server.
+    clear_state()
 
     print(f"\n{'='*60}")
     print(f"  🎬 VIDEO PIPELINE STARTING")
@@ -96,86 +98,60 @@ def run_pipeline(
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(IMAGES_DIR, exist_ok=True)
 
-    state = load_state()
+    state = {}  # always start fresh — resume logic removed (see batch.py for context)
 
     # --------------------------------------------------------
-    #  STEP 1 — Research + Generate script
+    #  STEP 1 — Research + Script
     # --------------------------------------------------------
-    if "script" not in state:
-        pipeline_status.update("Research + Script", 1, "Researching topic...", 5)
-        print("[ Step 1 / 5 ] — Research + Script generation")
-        research = research_topic(topic)
-        script = generate_script(
-            topic, auto=auto, research=research, mode=mode, style=style
-        )
-        state["script"] = script
-        state["style"]  = style   # persist so resume uses same style
-        save_state(state)
-    else:
-        print("[ Step 1 / 5 ] — Script (loaded from previous run)")
-        script = state["script"]
-        style  = state.get("style", style)  # honour original style on resume
+    pipeline_status.update("Research + Script", 1, "Researching topic...", 5)
+    print("[ Step 1 / 5 ] — Research + Script generation")
+    research = research_topic(topic)
+    script   = generate_script(topic, auto=auto, research=research, mode=mode, style=style)
+    state["script"] = script
+    state["style"]  = style
+    save_state(state)
 
     sentences = split_into_sentences(script)
     print(f"             {len(script.split())} words, {len(sentences)} sentences\n")
 
     # --------------------------------------------------------
-    #  STEP 2 — Generate image prompts
+    #  STEP 2 — Image prompts
     # --------------------------------------------------------
-    if "prompts" not in state:
-        pipeline_status.update("Image Prompts", 2, "Generating prompts...", 25)
-        print("[ Step 2 / 5 ] — Image prompt generation")
-        checkpoint("Review script before generating image prompts", auto)
-        prompts = generate_image_prompts(sentences, auto=auto, style=style)
-        state["prompts"] = prompts
-        save_state(state)
-    else:
-        print("[ Step 2 / 5 ] — Image prompts (loaded from previous run)")
-        prompts = state["prompts"]
-
+    pipeline_status.update("Image Prompts", 2, "Generating prompts...", 25)
+    print("[ Step 2 / 5 ] — Image prompt generation")
+    checkpoint("Review script before generating image prompts", auto)
+    prompts = generate_image_prompts(sentences, auto=auto, style=style)
+    state["prompts"] = prompts
+    save_state(state)
     print(f"             {len(prompts)} prompts\n")
     checkpoint("Review image prompts before starting image generation", auto)
 
     # --------------------------------------------------------
-    #  STEP 3 — Generate audio
+    #  STEP 3 — Audio
     # --------------------------------------------------------
-    if not os.path.exists(AUDIO_FILE):
-        pipeline_status.update("Audio", 3, "Generating voice audio...", 40)
-        print("[ Step 3 / 5 ] — Audio generation (Chatterbox)")
-        generate_audio(script)
-    else:
-        print("[ Step 3 / 5 ] — Audio (found existing file, skipping)\n")
+    pipeline_status.update("Audio", 3, "Generating voice audio...", 40)
+    print("[ Step 3 / 5 ] — Audio generation (Chatterbox)")
+    generate_audio(script)
 
     # --------------------------------------------------------
-    #  STEP 4 — Transcribe + timestamps
+    #  STEP 4 — Transcribe
     # --------------------------------------------------------
-    if not os.path.exists(TIMESTAMPS_FILE):
-        pipeline_status.update("Transcription", 4, "Running Whisper...", 55)
-        print("[ Step 4 / 5 ] — Transcription (Whisper)")
-        timestamps = transcribe_audio(AUDIO_FILE, script_sentences=sentences)
-    else:
-        print("[ Step 4 / 5 ] — Timestamps (found existing file, skipping)")
-        with open(TIMESTAMPS_FILE, "r") as f:
-            timestamps = json.load(f)
-        print(f"             {len(timestamps)} sentences\n")
+    pipeline_status.update("Transcription", 4, "Running Whisper...", 55)
+    print("[ Step 4 / 5 ] — Transcription (Whisper)")
+    timestamps = transcribe_audio(AUDIO_FILE, script_sentences=sentences)
 
     # --------------------------------------------------------
-    #  STEP 5 — Generate images
+    #  STEP 5 — Images
     # --------------------------------------------------------
-    existing_images = _get_existing_images()
     est_secs = len(prompts) * 45
-    if len(existing_images) < len(prompts):
-        pipeline_status.update("Image Generation", 5,
-                                f"Generating {len(prompts)} images...", 60)
-        print(f"[ Step 5 / 5 ] — Image generation "
-              f"({len(prompts)} images, ~{est_secs // 60}m {est_secs % 60}s)")
-        image_paths = generate_images(prompts, mode=mode)
-    else:
-        print(f"[ Step 5 / 5 ] — Images (found {len(existing_images)} existing, skipping)")
-        image_paths = existing_images
+    pipeline_status.update("Image Generation", 5,
+                            f"Generating {len(prompts)} images...", 60)
+    print(f"[ Step 5 / 5 ] — Image generation "
+          f"({len(prompts)} images, ~{est_secs // 60}m {est_secs % 60}s)")
+    image_paths = generate_images(prompts, mode=mode)
 
     # --------------------------------------------------------
-    #  FINAL — Assemble video
+    #  FINAL — Assemble
     # --------------------------------------------------------
     pipeline_status.update("Assembly", 5, "Assembling final video...", 90)
     print("\n[ Final ] — Assembling video")
@@ -189,9 +165,6 @@ def run_pipeline(
         mode=mode,
     )
 
-    # --------------------------------------------------------
-    #  Done!
-    # --------------------------------------------------------
     elapsed = datetime.now() - start_time
     mins    = int(elapsed.total_seconds() // 60)
     secs    = int(elapsed.total_seconds() % 60)
@@ -203,25 +176,20 @@ def run_pipeline(
     print(f"{'='*60}\n")
 
     if not auto:
-        resp = input("  Clean up temp files? (y/n): ").strip().lower()
-        if resp == "y":
+        if input("  Clean up temp files? (y/n): ").strip().lower() == "y":
             cleanup_temp()
     else:
         cleanup_temp()
 
-    if os.path.exists(STATE_FILE):
-        os.remove(STATE_FILE)
-
+    clear_state()
     return output_path
 
 
 def _get_existing_images() -> list[str]:
     if not os.path.exists(IMAGES_DIR):
         return []
-    files = [
-        f for f in os.listdir(IMAGES_DIR)
-        if f.lower().endswith((".png", ".jpg", ".jpeg"))
-    ]
+    files = [f for f in os.listdir(IMAGES_DIR)
+             if f.lower().endswith((".png", ".jpg", ".jpeg"))]
     files.sort()
     return [os.path.join(IMAGES_DIR, f) for f in files]
 
@@ -231,29 +199,20 @@ def _get_existing_images() -> list[str]:
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Generate a YouTube video from a single topic prompt."
-    )
-    parser.add_argument("topic", type=str, help='e.g. "The Avro Arrow"')
-    parser.add_argument("--auto",  action="store_true", help="No checkpoints")
-    parser.add_argument("--mode",  choices=["long", "short"],  default="long")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("topic", type=str)
+    parser.add_argument("--auto",  action="store_true")
+    parser.add_argument("--mode",  choices=["long", "short"],    default="long")
     parser.add_argument("--style", choices=["serious", "funny"], default=VIDEO_STYLE)
 
     args = parser.parse_args()
 
     try:
-        run_pipeline(
-            topic=args.topic,
-            auto=args.auto,
-            mode=args.mode,
-            style=args.style,
-        )
+        run_pipeline(topic=args.topic, auto=args.auto, mode=args.mode, style=args.style)
     except KeyboardInterrupt:
         print("\n\n⚠️  Pipeline interrupted by user.")
-        print("   Temp files preserved — re-run with the same topic to resume.")
         sys.exit(0)
     except Exception as e:
         print(f"\n❌ Pipeline failed: {e}")
         traceback.print_exc()
-        print("\n   Temp files preserved — fix the error and re-run to resume.")
         sys.exit(1)
