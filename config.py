@@ -41,7 +41,7 @@ FFPROBE    = os.path.join(FFMPEG_BIN, "ffprobe.exe")
 # --- Captions (Shorts only) ---
 CAPTION_STYLE       = "duo"
 CAPTION_FONT        = r"C:\Windows\Fonts\arialbd.ttf"
-CAPTION_FONT_SIZE   = 72
+CAPTION_FONT_SIZE   = 60
 CAPTION_COLOR       = "white"
 CAPTION_HIGHLIGHT   = "yellow"
 CAPTION_OUTLINE     = "black"

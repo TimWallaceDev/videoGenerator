@@ -1,5 +1,8 @@
 # ============================================================
 #  SERVER — FastAPI backend
+#  Queue is persisted to disk and survives server restarts.
+#  Any job that was mid-run when the server died is reset to
+#  "queued" and will be retried automatically.
 # ============================================================
 
 import os
@@ -25,26 +28,38 @@ import comfyui
 
 app = FastAPI(title="Video Pipeline")
 
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+STATIC_DIR      = os.path.join(BASE_DIR, "static")
+QUEUE_FILE      = os.path.join(BASE_DIR, "queue_state.json")
+
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 
 # ============================================================
-#  Queue management
+#  Queue item
 # ============================================================
 
 class QueueItem:
-    def __init__(self, topic: str, mode: str = "long", style: str = "serious"):
-        self.id       = str(uuid.uuid4())[:8]
+    def __init__(
+        self,
+        topic: str,
+        mode:  str = "long",
+        style: str = "serious",
+        item_id: str = None,
+        added_at: str = None,
+        status: str = "queued",
+        output: str = None,
+        error:  str = None,
+    ):
+        self.id       = item_id  or str(uuid.uuid4())[:8]
         self.topic    = topic
         self.mode     = mode
         self.style    = style
-        self.status   = "queued"
-        self.added_at = datetime.now().isoformat()
-        self.output   = None
-        self.error    = None
+        self.status   = status
+        self.added_at = added_at or datetime.now().isoformat()
+        self.output   = output
+        self.error    = error
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "id":       self.id,
             "topic":    self.topic,
@@ -56,10 +71,76 @@ class QueueItem:
             "error":    self.error,
         }
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "QueueItem":
+        return cls(
+            topic    = d["topic"],
+            mode     = d.get("mode",  "long"),
+            style    = d.get("style", "serious"),
+            item_id  = d.get("id"),
+            added_at = d.get("added_at"),
+            status   = d.get("status", "queued"),
+            output   = d.get("output"),
+            error    = d.get("error"),
+        )
 
-queue         = deque()
-history       = []
-queue_lock    = threading.Lock()
+
+# ============================================================
+#  Persistence
+# ============================================================
+
+queue      = deque()
+history    = []
+queue_lock = threading.Lock()
+
+
+def _save_queue():
+    """Write current queue and history to disk. Call while holding queue_lock."""
+    data = {
+        "queue":   [item.to_dict() for item in queue],
+        "history": [item.to_dict() for item in history],
+    }
+    tmp = QUEUE_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, QUEUE_FILE)   # atomic on all platforms
+
+
+def _load_queue():
+    """
+    Load queue and history from disk on startup.
+    Any item that was 'running' when the server died is reset to 'queued'
+    so it will be retried — it never actually finished.
+    """
+    if not os.path.exists(QUEUE_FILE):
+        return
+
+    try:
+        with open(QUEUE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        print("⚠️  Could not load queue_state.json — starting with empty queue")
+        return
+
+    for d in data.get("queue", []):
+        item = QueueItem.from_dict(d)
+        if item.status == "running":
+            # Server died mid-job — reset so it gets retried
+            item.status = "queued"
+            item.error  = None
+            print(f"   ↩️  Reset interrupted job to queued: {item.topic}")
+        queue.append(item)
+
+    for d in data.get("history", []):
+        history.append(QueueItem.from_dict(d))
+
+    print(f"   📂 Loaded {len(queue)} queued, {len(history)} history items from disk")
+
+
+# ============================================================
+#  Worker
+# ============================================================
+
 worker_thread = None
 
 
@@ -68,23 +149,28 @@ def queue_worker():
         item = None
         with queue_lock:
             if queue:
-                item = queue.popleft()
+                item = queue[0]   # peek — don't pop until done
 
         if item is None:
             threading.Event().wait(2)
             continue
 
-        # If ComfyUI has gone down between jobs, try to bring it back
+        # Check ComfyUI is up before starting
         if not comfyui.is_running():
             pipeline_status.log("⚠️  ComfyUI not responding — attempting restart...")
             if not comfyui.restart():
                 item.status = "failed"
                 item.error  = "ComfyUI failed to restart"
                 with queue_lock:
+                    queue.popleft()
                     history.insert(0, item)
+                    _save_queue()
                 continue
 
         item.status = "running"
+        with queue_lock:
+            _save_queue()   # persist "running" so we know to reset it on next startup
+
         pipeline_status.start(item.topic)
 
         try:
@@ -105,9 +191,11 @@ def queue_worker():
             traceback.print_exc()
 
         with queue_lock:
+            queue.popleft()
             history.insert(0, item)
             while len(history) > 50:
                 history.pop()
+            _save_queue()
 
 
 def start_worker():
@@ -131,9 +219,12 @@ class TopicRequest(BaseModel):
 def startup():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Start ComfyUI if it isn't already running
+    # Reload persisted queue before starting the worker
+    with queue_lock:
+        _load_queue()
+
     if comfyui.is_running():
-        print("✅ ComfyUI already running — skipping start")
+        print("✅ ComfyUI already running")
     else:
         print("🚀 Starting ComfyUI...")
         if not comfyui.start():
@@ -164,6 +255,7 @@ def add_to_queue(req: TopicRequest):
     item = QueueItem(topic, mode=mode, style=style)
     with queue_lock:
         queue.append(item)
+        _save_queue()
 
     return {"id": item.id, "topic": topic, "position": len(queue)}
 
@@ -182,9 +274,12 @@ def remove_from_queue(item_id: str):
     with queue_lock:
         for item in list(queue):
             if item.id == item_id:
+                if item.status == "running":
+                    raise HTTPException(status_code=400, detail="Cannot remove a running job")
                 queue.remove(item)
+                _save_queue()
                 return {"removed": True}
-    raise HTTPException(status_code=404, detail="Item not found or already running")
+    raise HTTPException(status_code=404, detail="Item not found")
 
 
 @app.get("/status")
@@ -194,13 +289,11 @@ def get_status():
 
 @app.get("/comfyui/status")
 def comfyui_status():
-    """Quick health check endpoint for the frontend to poll."""
     return {"running": comfyui.is_running()}
 
 
 @app.post("/comfyui/restart")
 def comfyui_restart():
-    """Manual restart endpoint — useful if ComfyUI gets wedged."""
     success = comfyui.restart()
     return {"success": success}
 
