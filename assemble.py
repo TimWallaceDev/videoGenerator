@@ -260,10 +260,11 @@ def assemble_video(
     timestamps: list[dict] = None,
     topic: str = "video",
     mode: str = "long",
+    captions: bool = True,
 ) -> str:
     """
     Assemble the final video from images, audio, and timestamps.
-    For Shorts (mode='short'), duo captions are burned in from words.json.
+    captions: if True and mode='short', duo captions are burned in from words.json.
     """
     if audio_path  is None: audio_path  = AUDIO_FILE
     if timestamps  is None: timestamps  = _load_timestamps()
@@ -294,7 +295,7 @@ def assemble_video(
     #  _build_filter_complex avoids any string replacement.
     # ----------------------------------------------------------
     caption_filters = []
-    if mode == "short":
+    if mode == "short" and captions:
         words = _load_words()
         if words:
             caption_filters = _build_duo_captions(words, audio_duration, cfg["height"])

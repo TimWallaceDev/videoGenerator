@@ -7,17 +7,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:        #0a0a0a;
-    --surface:   #111111;
-    --border:    #222222;
-    --accent:    #e8ff00;
-    --accent2:   #ff4444;
-    --accent3:   #ff6ec7;
-    --accent4:   #00cfff;
-    --text:      #e8e8e8;
-    --muted:     #555555;
-    --success:   #00ff88;
-    --warning:   #ffaa00;
+    --bg:      #0a0a0a;
+    --surface: #111111;
+    --border:  #222222;
+    --accent:  #e8ff00;
+    --accent2: #ff4444;
+    --accent3: #ff6ec7;
+    --accent4: #00cfff;
+    --text:    #e8e8e8;
+    --muted:   #555555;
+    --success: #00ff88;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -32,8 +31,7 @@
 
   body::before {
     content: '';
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+    position: fixed; inset: 0;
     background: repeating-linear-gradient(
       0deg, transparent, transparent 2px,
       rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px
@@ -55,7 +53,6 @@
     font-size: 32px;
     letter-spacing: 3px;
     color: var(--accent);
-    line-height: 1;
     animation: flicker 8s infinite;
   }
 
@@ -71,7 +68,6 @@
     display: grid;
     grid-template-columns: 1fr 380px;
     grid-template-rows: auto 1fr;
-    gap: 0;
     min-height: calc(100vh - 73px);
   }
 
@@ -79,18 +75,21 @@
   .submit-panel {
     grid-column: 1;
     grid-row: 1;
-    padding: 28px 32px;
+    padding: 24px 32px;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
   }
 
-  .submit-panel label {
-    display: block;
+  .field-label {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
+    font-size: 9px;
     letter-spacing: 2px;
     text-transform: uppercase;
     color: var(--muted);
-    margin-bottom: 10px;
+    margin-bottom: 6px;
+    display: block;
   }
 
   .input-row {
@@ -113,67 +112,73 @@
   .input-row input:focus { border-color: var(--accent); }
   .input-row input::placeholder { color: var(--muted); }
 
-  /* Toggle rows */
-  .toggles-row {
+  .controls-grid {
     display: flex;
-    align-items: center;
-    gap: 24px;
-    margin-top: 14px;
     flex-wrap: wrap;
+    gap: 20px;
+    align-items: flex-end;
   }
 
-  .toggle-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
+  .control-group { display: flex; flex-direction: column; }
 
-  .toggle-label {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
+  /* Toggle buttons */
+  .toggle-row { display: flex; }
 
-  .mode-toggle {
-    display: flex;
-    gap: 0;
-  }
-
-  .mode-btn {
+  .tog-btn {
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--muted);
     font-family: 'Bebas Neue', sans-serif;
-    font-size: 15px;
+    font-size: 14px;
     letter-spacing: 2px;
-    padding: 7px 18px;
+    padding: 7px 16px;
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
   }
 
-  .mode-btn:first-child { border-right: none; }
+  .tog-btn:not(:last-child) { border-right: none; }
 
-  /* Mode active states */
-  .mode-btn.active.long  { background: var(--accent);  border-color: var(--accent);  color: #000; }
-  .mode-btn.active.short { background: var(--accent3); border-color: var(--accent3); color: #000; }
+  .tog-btn.active.long    { background: var(--accent);  border-color: var(--accent);  color: #000; }
+  .tog-btn.active.short   { background: var(--accent3); border-color: var(--accent3); color: #000; }
+  .tog-btn.active.serious { background: var(--accent);  border-color: var(--accent);  color: #000; }
+  .tog-btn.active.funny   { background: var(--accent4); border-color: var(--accent4); color: #000; }
+  .tog-btn.active.cap-on  { background: var(--success); border-color: var(--success); color: #000; }
+  .tog-btn.active.cap-off { background: var(--border);  border-color: var(--border);  color: var(--muted); }
 
-  /* Style active states */
-  .style-btn:first-child { border-right: none; }
-  .style-btn { font-size: 14px; }
-  .style-btn.active.serious { background: var(--accent);  border-color: var(--accent);  color: #000; }
-  .style-btn.active.funny   { background: var(--accent4); border-color: var(--accent4); color: #000; }
-
-  .toggle-hint {
+  /* Select */
+  select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
-    color: var(--muted);
-    letter-spacing: 1px;
-    align-self: flex-end;
-    padding-bottom: 2px;
+    font-size: 11px;
+    padding: 8px 12px;
+    outline: none;
+    cursor: pointer;
+    min-width: 180px;
+    height: 34px;
   }
+
+  select:focus { border-color: var(--accent); }
+  select option { background: var(--surface); }
+
+  /* Style notes */
+  .notes-input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    padding: 8px 12px;
+    outline: none;
+    width: 280px;
+    height: 34px;
+    transition: border-color 0.2s;
+  }
+
+  .notes-input:focus { border-color: var(--accent4); }
+  .notes-input::placeholder { color: var(--muted); font-style: italic; }
 
   .btn {
     background: var(--accent);
@@ -186,17 +191,12 @@
     cursor: pointer;
     transition: opacity 0.15s;
     white-space: nowrap;
+    align-self: flex-end;
   }
 
-  .btn:hover { opacity: 0.85; }
+  .btn:hover   { opacity: 0.85; }
   .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  .btn.danger {
-    background: var(--accent2);
-    color: #fff;
-    font-size: 13px;
-    padding: 6px 14px;
-  }
+  .btn.danger  { background: var(--accent2); color: #fff; font-size: 13px; padding: 6px 14px; }
 
   /* ---- Status sidebar ---- */
   .status-panel {
@@ -233,25 +233,22 @@
     padding: 40px 0;
   }
 
-  .current-topic { font-size: 15px; font-weight: 500; line-height: 1.4; }
-  .step-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--accent); letter-spacing: 1px; }
-  .detail-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); }
+  .current-topic  { font-size: 15px; font-weight: 500; line-height: 1.4; }
+  .step-label     { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--accent); letter-spacing: 1px; }
+  .detail-label   { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); }
+  .elapsed        { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); }
 
   .progress-bar {
-    width: 100%;
-    height: 3px;
+    width: 100%; height: 3px;
     background: var(--border);
-    position: relative;
-    overflow: hidden;
+    position: relative; overflow: hidden;
   }
 
   .progress-fill { height: 100%; background: var(--accent); transition: width 0.5s ease; }
 
   .progress-bar.running::after {
     content: '';
-    position: absolute;
-    top: 0; bottom: 0;
-    width: 40%;
+    position: absolute; top: 0; bottom: 0; width: 40%;
     background: linear-gradient(90deg, transparent, rgba(232,255,0,0.4), transparent);
     animation: sweep 1.5s linear infinite;
   }
@@ -269,11 +266,10 @@
     flex-shrink: 0;
   }
 
-  .log-line { color: #888; }
+  .log-line        { color: #888; }
   .log-line.recent { color: var(--text); }
-  .elapsed { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); }
 
-  /* ---- Queue + Videos ---- */
+  /* ---- Main content ---- */
   .main-content {
     grid-column: 1;
     grid-row: 2;
@@ -298,10 +294,11 @@
   .queue-item {
     background: var(--surface);
     border: 1px solid var(--border);
-    padding: 12px 16px;
+    padding: 10px 14px;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
   .queue-item .pos {
@@ -310,27 +307,40 @@
     color: var(--muted);
     width: 24px;
     text-align: center;
+    flex-shrink: 0;
   }
 
-  .queue-item .topic { flex: 1; font-size: 14px; line-height: 1.3; }
+  .queue-item .topic { flex: 1; font-size: 14px; line-height: 1.3; min-width: 120px; }
+  .queue-item .notes-preview {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    font-style: italic;
+    width: 100%;
+    padding-left: 32px;
+    margin-top: -4px;
+  }
 
   .badge {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
+    font-size: 9px;
     letter-spacing: 1px;
-    padding: 3px 8px;
+    padding: 2px 7px;
     text-transform: uppercase;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
-  .badge.queued  { background: var(--border); color: var(--muted); }
-  .badge.running { background: var(--accent); color: #000; }
-  .badge.done    { background: var(--success); color: #000; }
-  .badge.failed  { background: var(--accent2); color: #fff; }
-
-  .badge.short-badge   { background: var(--accent3); color: #000; font-size: 9px; padding: 2px 6px; }
-  .badge.long-badge    { background: var(--border);  color: var(--muted); font-size: 9px; padding: 2px 6px; }
-  .badge.serious-badge { background: var(--accent);  color: #000; font-size: 9px; padding: 2px 6px; }
-  .badge.funny-badge   { background: var(--accent4); color: #000; font-size: 9px; padding: 2px 6px; }
+  .badge.queued   { background: var(--border);  color: var(--muted); }
+  .badge.running  { background: var(--accent);  color: #000; }
+  .badge.done     { background: var(--success); color: #000; }
+  .badge.failed   { background: var(--accent2); color: #fff; }
+  .badge.short-b  { background: var(--accent3); color: #000; }
+  .badge.long-b   { background: var(--border);  color: var(--muted); }
+  .badge.serious-b{ background: var(--accent);  color: #000; }
+  .badge.funny-b  { background: var(--accent4); color: #000; }
+  .badge.cap-b    { background: var(--success); color: #000; }
+  .badge.voice-b  { background: #2a2a2a; color: #aaa; }
 
   .video-item {
     background: var(--surface);
@@ -345,7 +355,6 @@
     flex: 1;
     font-family: 'IBM Plex Mono', monospace;
     font-size: 11px;
-    color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -372,15 +381,11 @@
   .empty-state { color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 12px; padding: 16px 0; }
 
   .toast {
-    position: fixed;
-    bottom: 24px;
-    left: 50%;
+    position: fixed; bottom: 24px; left: 50%;
     transform: translateX(-50%) translateY(80px);
-    background: var(--accent);
-    color: #000;
+    background: var(--accent); color: #000;
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 12px;
-    letter-spacing: 1px;
+    font-size: 12px; letter-spacing: 1px;
     padding: 10px 20px;
     transition: transform 0.3s ease;
     z-index: 1000;
@@ -389,13 +394,12 @@
   .toast.show { transform: translateX(-50%) translateY(0); }
 
   @keyframes flicker {
-    0%, 100% { opacity: 1; } 92% { opacity: 1; } 93% { opacity: 0.8; }
-    94% { opacity: 1; } 96% { opacity: 0.9; } 97% { opacity: 1; }
+    0%, 100% { opacity: 1; } 92% { opacity: 1; }
+    93% { opacity: 0.8; } 94% { opacity: 1; }
+    96% { opacity: 0.9; } 97% { opacity: 1; }
   }
 
-  @keyframes sweep {
-    from { left: -40%; } to { left: 140%; }
-  }
+  @keyframes sweep { from { left: -40%; } to { left: 140%; } }
 </style>
 </head>
 <body>
@@ -407,37 +411,62 @@
 
 <div class="layout">
 
-  <!-- Submit -->
+  <!-- Submit panel -->
   <div class="submit-panel">
-    <label>New Video Topic</label>
-    <div class="input-row">
-      <input type="text" id="topicInput"
-        placeholder='e.g. "Why we self-sabotage" or "The time a beaver caused an international incident"'
-        onkeydown="if(event.key==='Enter') submitTopic()">
-      <button class="btn" onclick="submitTopic()">QUEUE IT</button>
+
+    <!-- Topic input -->
+    <div>
+      <label class="field-label">Topic</label>
+      <div class="input-row">
+        <input type="text" id="topicInput"
+          placeholder='e.g. "Why we self-sabotage" or "The time a beaver caused an international incident"'
+          onkeydown="if(event.key==='Enter') submitTopic()">
+        <button class="btn" onclick="submitTopic()">QUEUE IT</button>
+      </div>
     </div>
 
-    <div class="toggles-row">
+    <!-- Controls row -->
+    <div class="controls-grid">
 
-      <!-- Mode toggle -->
-      <div class="toggle-group">
-        <div class="toggle-label">Format</div>
-        <div class="mode-toggle">
-          <button class="mode-btn active long" id="btnLong"  onclick="setMode('long')">🎬 LONG</button>
-          <button class="mode-btn short"       id="btnShort" onclick="setMode('short')">📱 SHORT</button>
+      <!-- Format -->
+      <div class="control-group">
+        <label class="field-label">Format</label>
+        <div class="toggle-row">
+          <button class="tog-btn active long"  id="btnLong"  onclick="setMode('long')">🎬 LONG</button>
+          <button class="tog-btn short"         id="btnShort" onclick="setMode('short')">📱 SHORT</button>
         </div>
       </div>
 
-      <!-- Style toggle -->
-      <div class="toggle-group">
-        <div class="toggle-label">Style</div>
-        <div class="mode-toggle">
-          <button class="mode-btn style-btn active serious" id="btnSerious" onclick="setStyle('serious')">🎙 SERIOUS</button>
-          <button class="mode-btn style-btn funny"          id="btnFunny"   onclick="setStyle('funny')">😄 FUNNY</button>
+      <!-- Style -->
+      <div class="control-group">
+        <label class="field-label">Style</label>
+        <div class="toggle-row">
+          <button class="tog-btn active serious" id="btnSerious" onclick="setStyle('serious')">🎙 SERIOUS</button>
+          <button class="tog-btn funny"          id="btnFunny"   onclick="setStyle('funny')">😄 FUNNY</button>
         </div>
       </div>
 
-      <div class="toggle-hint" id="comboHint">Long-form · Serious documentary</div>
+      <!-- Captions (only visible for Shorts) -->
+      <div class="control-group" id="captionsGroup">
+        <label class="field-label">Captions</label>
+        <div class="toggle-row">
+          <button class="tog-btn active cap-on"  id="btnCapOn"  onclick="setCaptions(true)">CC ON</button>
+          <button class="tog-btn cap-off"         id="btnCapOff" onclick="setCaptions(false)">CC OFF</button>
+        </div>
+      </div>
+
+      <!-- Voice -->
+      <div class="control-group">
+        <label class="field-label">Voice</label>
+        <select id="voiceSelect"></select>
+      </div>
+
+      <!-- Style notes -->
+      <div class="control-group">
+        <label class="field-label">Style Notes <span style="opacity:0.4">(optional)</span></label>
+        <input class="notes-input" type="text" id="notesInput"
+          placeholder='e.g. "focus on psychology" · "suitable for kids"'>
+      </div>
 
     </div>
   </div>
@@ -452,21 +481,18 @@
 
   <!-- Main content -->
   <div class="main-content">
-
     <div>
       <div class="section-title">Queue</div>
       <div class="queue-list" id="queueList">
         <div class="empty-state">No topics queued.</div>
       </div>
     </div>
-
     <div>
       <div class="section-title">Completed Videos</div>
       <div class="video-list" id="videoList">
         <div class="empty-state">No videos yet.</div>
       </div>
     </div>
-
   </div>
 
 </div>
@@ -477,59 +503,80 @@
   let lastStatus   = null;
   let currentMode  = 'long';
   let currentStyle = 'serious';
+  let currentCaps  = true;
+  let voices       = [];
 
-  const COMBO_HINTS = {
-    'long-serious':  'Long-form · Serious documentary',
-    'long-funny':    'Long-form · Upbeat & humorous',
-    'short-serious': 'Shorts · Sharp & impactful',
-    'short-funny':   'Shorts · Fast & funny',
-  };
+  // ---- Init voices ----
+  async function loadVoices() {
+    try {
+      const res  = await fetch('/voices');
+      const data = await res.json();
+      voices = data.voices;
+      const sel = document.getElementById('voiceSelect');
+      sel.innerHTML = voices.map(v =>
+        `<option value="${v.id}"${v.id === data.default ? ' selected' : ''}>${v.label}</option>`
+      ).join('');
+    } catch(e) {
+      console.error('Could not load voices', e);
+    }
+  }
 
   // ---- Mode toggle ----
   function setMode(mode) {
     currentMode = mode;
-    document.getElementById('btnLong').className  = 'mode-btn long'  + (mode === 'long'  ? ' active' : '');
-    document.getElementById('btnShort').className = 'mode-btn short' + (mode === 'short' ? ' active' : '');
-    updateHint();
+    document.getElementById('btnLong').className  = 'tog-btn long'  + (mode === 'long'  ? ' active' : '');
+    document.getElementById('btnShort').className = 'tog-btn short' + (mode === 'short' ? ' active' : '');
+    // Show captions toggle only for Shorts
+    document.getElementById('captionsGroup').style.display = mode === 'short' ? '' : 'none';
   }
 
   // ---- Style toggle ----
   function setStyle(style) {
     currentStyle = style;
-    document.getElementById('btnSerious').className = 'mode-btn style-btn serious' + (style === 'serious' ? ' active' : '');
-    document.getElementById('btnFunny').className   = 'mode-btn style-btn funny'   + (style === 'funny'   ? ' active' : '');
-    updateHint();
+    document.getElementById('btnSerious').className = 'tog-btn serious' + (style === 'serious' ? ' active' : '');
+    document.getElementById('btnFunny').className   = 'tog-btn funny'   + (style === 'funny'   ? ' active' : '');
   }
 
-  function updateHint() {
-    document.getElementById('comboHint').textContent =
-      COMBO_HINTS[`${currentMode}-${currentStyle}`] || '';
+  // ---- Captions toggle ----
+  function setCaptions(on) {
+    currentCaps = on;
+    document.getElementById('btnCapOn').className  = 'tog-btn cap-on'  + (on  ? ' active' : '');
+    document.getElementById('btnCapOff').className = 'tog-btn cap-off' + (!on ? ' active' : '');
   }
 
-  // ---- Submit topic ----
+  // ---- Submit ----
   async function submitTopic() {
-    const input = document.getElementById('topicInput');
-    const topic = input.value.trim();
+    const topic = document.getElementById('topicInput').value.trim();
     if (!topic) return;
+
+    const voice_id    = document.getElementById('voiceSelect').value;
+    const style_notes = document.getElementById('notesInput').value.trim();
 
     try {
       const res = await fetch('/queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic, mode: currentMode, style: currentStyle })
+        body: JSON.stringify({
+          topic,
+          mode:        currentMode,
+          style:       currentStyle,
+          voice_id,
+          captions:    currentCaps,
+          style_notes,
+        })
       });
       const data = await res.json();
-      input.value = '';
-      const modeLabel  = currentMode  === 'short'   ? '📱' : '🎬';
-      const styleLabel = currentStyle === 'funny'   ? '😄' : '🎙';
-      showToast(`${modeLabel}${styleLabel} Added at position ${data.position}`);
+      document.getElementById('topicInput').value  = '';
+      document.getElementById('notesInput').value  = '';
+      const icons = (currentMode === 'short' ? '📱' : '🎬') + (currentStyle === 'funny' ? '😄' : '🎙');
+      showToast(`${icons} Added at position ${data.position}`);
       refreshQueue();
-    } catch (e) {
+    } catch(e) {
       showToast('Failed to add topic');
     }
   }
 
-  // ---- Remove from queue ----
+  // ---- Remove ----
   async function removeFromQueue(id) {
     try {
       await fetch(`/queue/${id}`, { method: 'DELETE' });
@@ -537,63 +584,65 @@
     } catch(e) {}
   }
 
-  // ---- Refresh queue ----
+  // ---- Queue display ----
   async function refreshQueue() {
     try {
       const res  = await fetch('/queue');
       const data = await res.json();
+      const el   = document.getElementById('queueList');
 
-      const queueEl  = document.getElementById('queueList');
       const allItems = [
         ...data.queue.map((item, i) => ({ ...item, pos: i + 1 })),
-        ...data.history
+        ...data.history,
       ];
 
       if (allItems.length === 0) {
-        queueEl.innerHTML = '<div class="empty-state">No topics queued.</div>';
-      } else {
-        queueEl.innerHTML = allItems.map(item => `
+        el.innerHTML = '<div class="empty-state">No topics queued.</div>';
+        return;
+      }
+
+      el.innerHTML = allItems.map(item => {
+        const voiceLabel = voices.find(v => v.id === item.voice_id)?.label || item.voice_id || '';
+        const notes = item.style_notes ? `<div class="notes-preview">"${escHtml(item.style_notes)}"</div>` : '';
+        const capBadge = item.mode === 'short' && item.captions
+          ? `<span class="badge cap-b">CC</span>` : '';
+
+        return `
           <div class="queue-item">
             <div class="pos">${item.pos || '—'}</div>
             <div class="topic">${escHtml(item.topic)}</div>
-            <span class="badge ${item.mode === 'short' ? 'short-badge' : 'long-badge'}">
-              ${item.mode === 'short' ? '📱 SHORT' : '🎬 LONG'}
-            </span>
-            <span class="badge ${item.style === 'funny' ? 'funny-badge' : 'serious-badge'}">
-              ${item.style === 'funny' ? '😄 FUNNY' : '🎙 SERIOUS'}
-            </span>
+            <span class="badge ${item.mode === 'short' ? 'short-b' : 'long-b'}">${item.mode === 'short' ? '📱' : '🎬'} ${item.mode}</span>
+            <span class="badge ${item.style === 'funny' ? 'funny-b' : 'serious-b'}">${item.style === 'funny' ? '😄' : '🎙'} ${item.style}</span>
+            ${capBadge}
+            <span class="badge voice-b">${escHtml(voiceLabel)}</span>
             <span class="badge ${item.status}">${item.status}</span>
-            ${item.status === 'queued'
-              ? `<button class="btn danger" onclick="removeFromQueue('${item.id}')">✕</button>`
-              : ''}
-          </div>
-        `).join('');
-      }
+            ${item.status === 'queued' ? `<button class="btn danger" onclick="removeFromQueue('${item.id}')">✕</button>` : ''}
+            ${notes}
+          </div>`;
+      }).join('');
     } catch(e) {}
   }
 
-  // ---- Refresh videos ----
+  // ---- Videos ----
   async function refreshVideos() {
     try {
       const res  = await fetch('/videos');
       const data = await res.json();
       const el   = document.getElementById('videoList');
-
       if (data.videos.length === 0) {
         el.innerHTML = '<div class="empty-state">No videos yet.</div>';
-      } else {
-        el.innerHTML = data.videos.map(v => `
-          <div class="video-item">
-            <div class="filename">${escHtml(v.filename)}</div>
-            <div class="meta">${v.size_mb} MB</div>
-            <a class="download-btn" href="${v.url}" download>↓ DOWNLOAD</a>
-          </div>
-        `).join('');
+        return;
       }
+      el.innerHTML = data.videos.map(v => `
+        <div class="video-item">
+          <div class="filename">${escHtml(v.filename)}</div>
+          <div class="meta">${v.size_mb} MB</div>
+          <a class="download-btn" href="${v.url}" download>↓ DOWNLOAD</a>
+        </div>`).join('');
     } catch(e) {}
   }
 
-  // ---- Poll status ----
+  // ---- Status ----
   async function pollStatus() {
     try {
       const res    = await fetch('/status');
@@ -606,44 +655,37 @@
       }
 
       const elapsed = status.elapsed_sec
-        ? `${Math.floor(status.elapsed_sec/60)}m ${status.elapsed_sec%60}s`
-        : '—';
+        ? `${Math.floor(status.elapsed_sec/60)}m ${status.elapsed_sec%60}s` : '—';
 
       const logs = (status.log_lines || []).slice(-8).map((line, i, arr) =>
         `<div class="log-line ${i === arr.length-1 ? 'recent' : ''}">${escHtml(line)}</div>`
       ).join('');
 
-      const progressPct = status.progress || 0;
-      const isRunning   = status.running;
-
       el.innerHTML = `
         <div class="current-topic">${escHtml(status.topic)}</div>
         <div class="step-label">${escHtml(status.step || '...')}</div>
-        <div class="progress-bar ${isRunning ? 'running' : ''}">
-          <div class="progress-fill" style="width:${progressPct}%"></div>
+        <div class="progress-bar ${status.running ? 'running' : ''}">
+          <div class="progress-fill" style="width:${status.progress || 0}%"></div>
         </div>
         <div class="detail-label">${escHtml(status.detail || '')}</div>
         <div class="elapsed">Elapsed: ${elapsed}</div>
         <div class="log-box">${logs}</div>
         ${status.error ? `<div class="badge failed">Error: ${escHtml(status.error)}</div>` : ''}
-        ${!isRunning && status.output_file
+        ${!status.running && status.output_file
           ? `<a class="download-btn" href="/download/${encodeURIComponent(status.output_file.split(/[\\/]/).pop())}" download>↓ DOWNLOAD LATEST</a>`
-          : ''}
-      `;
+          : ''}`;
 
-      if (!isRunning && lastStatus && lastStatus.running) {
+      if (!status.running && lastStatus && lastStatus.running) {
         refreshVideos();
         refreshQueue();
       }
       lastStatus = status;
-
     } catch(e) {}
   }
 
-  // ---- Helpers ----
   function escHtml(str) {
     if (!str) return '';
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
   function showToast(msg) {
@@ -654,6 +696,8 @@
   }
 
   // ---- Init ----
+  setMode('long');   // hides captions toggle initially (long form)
+  loadVoices();
   refreshQueue();
   refreshVideos();
   pollStatus();

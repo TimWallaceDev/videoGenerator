@@ -1,6 +1,5 @@
 # ============================================================
 #  VIDEO PIPELINE — CENTRAL CONFIG
-#  Edit this file to change settings. No need to touch other modules.
 # ============================================================
 
 import os
@@ -26,11 +25,7 @@ COMFYUI_URL     = "http://localhost:8188"
 CHATTERBOX_WORKFLOW = os.path.join(WORKFLOWS_DIR, "chatterbox.json")
 IMAGEGEN_WORKFLOW   = os.path.join(WORKFLOWS_DIR, "imagegen.json")
 
-# Path to ComfyUI's main.py — used by comfyui.py to start/restart the server
-COMFYUI_PATH = r"C:\Users\RAZER\comfy\ComfyUI\ComfyUI\main.py"
-
-# Restart ComfyUI every N videos in a batch run to prevent VRAM accumulation.
-# Set to 0 to disable automatic restarts.
+COMFYUI_PATH          = r"C:\Users\RAZER\comfy\ComfyUI\ComfyUI\main.py"
 COMFYUI_RESTART_EVERY = 5
 
 # --- ffmpeg ---
@@ -38,15 +33,18 @@ FFMPEG_BIN = r"C:\Users\RAZER\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpe
 FFMPEG     = os.path.join(FFMPEG_BIN, "ffmpeg.exe")
 FFPROBE    = os.path.join(FFMPEG_BIN, "ffprobe.exe")
 
-# --- Captions (Shorts only) ---
-CAPTION_STYLE       = "duo"
-CAPTION_FONT        = r"C:\Windows\Fonts\arialbd.ttf"
-CAPTION_FONT_SIZE   = 60
-CAPTION_COLOR       = "white"
-CAPTION_HIGHLIGHT   = "yellow"
-CAPTION_OUTLINE     = "black"
-CAPTION_OUTLINE_PX  = 4
-CAPTION_Y_POS       = 0.75
+# --- Captions ---
+CAPTION_STYLE      = "duo"
+CAPTION_FONT       = r"C:\Windows\Fonts\arialbd.ttf"
+CAPTION_FONT_SIZE  = 72
+CAPTION_COLOR      = "white"
+CAPTION_OUTLINE    = "black"
+CAPTION_OUTLINE_PX = 4
+CAPTION_Y_POS      = 0.75
+
+# Whether captions are enabled by default for Shorts.
+# Overridden at runtime by the frontend / CLI.
+CAPTIONS_DEFAULT = True
 
 # --- Pipeline behaviour ---
 AUTO_MODE = False
@@ -72,6 +70,37 @@ VIDEO_FPS    = VIDEO_CONFIGS[VIDEO_MODE]["fps"]
 
 # --- Default style ---
 VIDEO_STYLE = "serious"
+
+# ============================================================
+#  VOICES
+#  Each entry is a dict with:
+#    id    — unique key used in the API and stored in queue
+#    label — human-readable name shown in the UI
+#    file  — filename inside ComfyUI/input/ (must exist there)
+# ============================================================
+
+VOICES = [
+    {"id": "en_default",  "label": "EN — Default",     "file": "EN - Sample.mp3"},
+    {"id": "en_voice2",   "label": "EN — Voice 2",      "file": "voice sample 2.mp3"},
+    {"id": "en_ss",       "label": "EN — SS",           "file": "SS voice sample.mp3"},
+    {"id": "es_sample",   "label": "ES — Spanish",      "file": "ES - Sample.mp3"},
+    {"id": "pt_sample",   "label": "PT — Portuguese",   "file": "PT - Sample.mp3"},
+    {"id": "pt_voice2",   "label": "PT — Portuguese 2", "file": "PT - Voice Sample 2 .mp3"},
+]
+
+# The voice used when none is specified
+DEFAULT_VOICE_ID = "en_default"
+
+def get_voice_file(voice_id: str) -> str:
+    """Return the ComfyUI input filename for a given voice ID."""
+    for v in VOICES:
+        if v["id"] == voice_id:
+            return v["file"]
+    # Fallback to default
+    for v in VOICES:
+        if v["id"] == DEFAULT_VOICE_ID:
+            return v["file"]
+    return VOICES[0]["file"]
 
 
 # ============================================================
@@ -139,6 +168,7 @@ TECHNICAL RULES:
 - No embedded references or citations
 - Each sentence should be a complete thought suitable for a single image
 - Target length: {target_length}
+{style_notes}
 """
 
 _SCRIPT_SERIOUS_SHORT = """
@@ -172,6 +202,7 @@ TECHNICAL RULES:
 - No section headers, no bullet points, just flowing narration
 - Each sentence must be a complete thought suitable for a single image
 - Target length: {target_length}
+{style_notes}
 """
 
 _SCRIPT_FUNNY_LONG = """
@@ -225,6 +256,7 @@ TECHNICAL RULES:
 - No embedded references or citations
 - Each sentence should be a complete thought suitable for a single image
 - Target length: {target_length}
+{style_notes}
 """
 
 _SCRIPT_FUNNY_SHORT = """
@@ -251,6 +283,7 @@ TECHNICAL RULES:
 - No section headers, no bullet points, just flowing narration
 - Each sentence must be a complete thought suitable for a single image
 - Target length: {target_length}
+{style_notes}
 """
 
 # ============================================================
@@ -267,8 +300,8 @@ _LENGTH_SERIOUS_LONG = (
 )
 
 _LENGTH_SERIOUS_SHORT = (
-    "20 to 45 seconds of spoken narration — approximately fifty to one "
-    "hundred words total. Not a word more. "
+    "45 to 60 seconds of spoken narration — approximately one hundred to one "
+    "hundred and twenty words total. Not a word more. "
     "This is a single dramatic beat, not a full story. "
     "Write the minimum number of sentences needed to deliver maximum impact."
 )
@@ -283,8 +316,8 @@ _LENGTH_FUNNY_LONG = (
 )
 
 _LENGTH_FUNNY_SHORT = (
-    "20 to 30 seconds of spoken narration — approximately fifty to"
-    "ninety words total. Punchy and tight. "
+    "40 to 55 seconds of spoken narration — approximately ninety to one hundred "
+    "and ten words total. Punchy and tight. "
     "One setup, one payoff, one perfect send-off line."
 )
 
@@ -300,21 +333,16 @@ For each sentence of narration provided, generate one image prompt.
 RULES:
 - NO TEXT of any kind — no signs, no readable text, no chalkboards,
   no newspapers with legible words, no storefronts with writing.
-  If a scene would naturally have text, shoot from an angle or distance
-  where it is not legible, or choose a different visual element entirely.
 - Match the emotional register of the narration precisely.
-  A sentence about loss: muted tones, empty space, long shadows.
-  A sentence about discovery: bright light, open space, movement.
-  A sentence about power: dramatic architecture, high contrast, low angle.
-  A sentence about dread: tight framing, darkness at the edges, stillness.
+  Loss: muted tones, empty space, long shadows.
+  Discovery: bright light, open space, movement.
+  Power: dramatic architecture, high contrast, low angle.
+  Dread: tight framing, darkness at the edges, stillness.
 - Think like a cinematographer. Describe light source, camera angle,
   depth of field, and mood — not just subject matter.
-- Period and context accuracy matters. Reflect the era, setting, and field
-  (historical, scientific, psychological, etc.) in every detail.
+- Period and context accuracy matters.
 - Never reference real named people, specific real locations by name,
   or copyrighted material.
-- Generic but vivid: "a mid-century research laboratory with banks of
-  humming equipment and fluorescent light" not "MIT in 1962."
 - Keep each prompt to 1-2 sentences.
 - Return exactly one prompt per sentence — no more, no less.
 - Return ONLY a valid JSON array of strings, no markdown fences, nothing else.
@@ -329,19 +357,13 @@ For each sentence of narration provided, generate one image prompt.
 
 RULES:
 - NO TEXT of any kind — no signs, no readable text, no labels, nothing.
-- Match the comedic energy of the narration. Absurd situations need
-  visually absurd framing. Understated jokes need deadpan, clinical
-  composition. Big chaotic moments need wide, overwhelming shots.
-- Think like a comedy director. Framing, expression, and lighting are
-  all part of the joke. A close-up on a single ridiculous detail is often
-  funnier than a wide establishing shot.
-- Lean into unexpected angles, awkward compositions, and bathetic contrasts
-  — the mundane presented with the grandeur of an epic, or the supposedly
-  important presented in the most undignified way possible.
-- Characters should be generic and non-specific — no real people,
-  no named locations, no copyrighted material.
-- Bright, high-contrast, and dynamic visuals tend to work better for
-  this tone than muted or cinematic ones. Unless the joke is the contrast.
+- Match the comedic energy of the narration. Absurd situations get absurd
+  framing. Understated jokes get deadpan, clinical composition.
+- Think like a comedy director. A close-up on a single ridiculous detail is
+  often funnier than a wide establishing shot.
+- Lean into unexpected angles and bathetic contrasts — the mundane presented
+  with the grandeur of an epic, or the important presented undignified.
+- No real people, no named locations, no copyrighted material.
 - Keep each prompt to 1-2 sentences.
 - Return exactly one prompt per sentence — no more, no less.
 - Return ONLY a valid JSON array of strings, no markdown fences, nothing else.

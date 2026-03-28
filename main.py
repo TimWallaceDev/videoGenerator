@@ -1,9 +1,5 @@
 # ============================================================
 #  VIDEO PIPELINE — MAIN ORCHESTRATOR
-#  Usage:
-#    python main.py "The Stanford Prison Experiment"
-#    python main.py "The Avro Arrow" --auto
-#    python main.py "Crazy fact" --auto --mode short --style funny
 # ============================================================
 
 import os
@@ -22,32 +18,18 @@ from research   import research_topic
 from status     import pipeline_status
 
 from config import (
-    TEMP_DIR,
-    OUTPUT_DIR,
-    IMAGES_DIR,
-    TIMESTAMPS_FILE,
-    AUDIO_FILE,
-    VIDEO_CONFIGS,
-    VIDEO_STYLE,
+    TEMP_DIR, OUTPUT_DIR, IMAGES_DIR,
+    TIMESTAMPS_FILE, AUDIO_FILE, VIDEO_CONFIGS,
+    VIDEO_STYLE, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT,
 )
 
-
-# ------------------------------------------------------------
-#  Checkpoint helper
-# ------------------------------------------------------------
 
 def checkpoint(label: str, auto: bool):
     if auto:
         return
-    print(f"\n{'='*60}")
-    print(f"  CHECKPOINT: {label}")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}\n  CHECKPOINT: {label}\n{'='*60}")
     input("  Press Enter to continue, or Ctrl+C to abort...\n")
 
-
-# ------------------------------------------------------------
-#  Pipeline state
-# ------------------------------------------------------------
 
 STATE_FILE = os.path.join(TEMP_DIR, "pipeline_state.json")
 
@@ -55,12 +37,6 @@ def save_state(state: dict):
     os.makedirs(TEMP_DIR, exist_ok=True)
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
-
-def load_state() -> dict:
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    return {}
 
 def clear_state():
     if os.path.exists(STATE_FILE):
@@ -72,33 +48,48 @@ def clear_state():
 # ------------------------------------------------------------
 
 def run_pipeline(
-    topic: str,
-    auto: bool = False,
-    mode: str = "long",
-    style: str = "serious",
+    topic:    str,
+    auto:     bool = False,
+    mode:     str  = "long",
+    style:    str  = "serious",
+    voice_id: str  = None,
+    captions: bool = None,
+    style_notes: str = "",
 ):
+    """
+    Full pipeline from topic string to finished .mp4.
+
+    voice_id : ID from config.VOICES. Defaults to DEFAULT_VOICE_ID.
+    captions : Whether to burn in duo captions (Shorts only).
+               Defaults to CAPTIONS_DEFAULT from config.
+    style_notes: Optional free-text modifier appended to the script prompt.
+    """
+    if voice_id is None:
+        voice_id = DEFAULT_VOICE_ID
+    if captions is None:
+        captions = CAPTIONS_DEFAULT
+
     cfg        = VIDEO_CONFIGS[mode]
     start_time = datetime.now()
 
-    # Always clear state at the start of a new run.
-    # This prevents the previous video's state from bleeding
-    # into the next topic when running via batch or server.
+    # Always start fresh — prevents previous run bleeding into next topic
     clear_state()
 
     print(f"\n{'='*60}")
     print(f"  🎬 VIDEO PIPELINE STARTING")
-    print(f"  Topic : {topic}")
-    print(f"  Mode  : {'AUTO' if auto else 'MANUAL'} | {mode.upper()}"
-          f" ({cfg['width']}x{cfg['height']})")
-    print(f"  Style : {style.upper()}")
-    print(f"  Time  : {start_time.strftime('%H:%M:%S')}")
+    print(f"  Topic    : {topic}")
+    print(f"  Mode     : {'AUTO' if auto else 'MANUAL'} | {mode.upper()} ({cfg['width']}x{cfg['height']})")
+    print(f"  Style    : {style.upper()}")
+    print(f"  Voice    : {voice_id}")
+    print(f"  Captions : {captions}")
+    if style_notes:
+        print(f"  Notes    : {style_notes}")
+    print(f"  Time     : {start_time.strftime('%H:%M:%S')}")
     print(f"{'='*60}\n")
 
     os.makedirs(TEMP_DIR,   exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(IMAGES_DIR, exist_ok=True)
-
-    state = {}  # always start fresh — resume logic removed (see batch.py for context)
 
     # --------------------------------------------------------
     #  STEP 1 — Research + Script
@@ -106,10 +97,11 @@ def run_pipeline(
     pipeline_status.update("Research + Script", 1, "Researching topic...", 5)
     print("[ Step 1 / 5 ] — Research + Script generation")
     research = research_topic(topic)
-    script   = generate_script(topic, auto=auto, research=research, mode=mode, style=style)
-    state["script"] = script
-    state["style"]  = style
-    save_state(state)
+    script   = generate_script(
+        topic, auto=auto, research=research,
+        mode=mode, style=style, style_notes=style_notes,
+    )
+    save_state({"script": script, "style": style})
 
     sentences = split_into_sentences(script)
     print(f"             {len(script.split())} words, {len(sentences)} sentences\n")
@@ -121,8 +113,6 @@ def run_pipeline(
     print("[ Step 2 / 5 ] — Image prompt generation")
     checkpoint("Review script before generating image prompts", auto)
     prompts = generate_image_prompts(sentences, auto=auto, style=style)
-    state["prompts"] = prompts
-    save_state(state)
     print(f"             {len(prompts)} prompts\n")
     checkpoint("Review image prompts before starting image generation", auto)
 
@@ -131,7 +121,7 @@ def run_pipeline(
     # --------------------------------------------------------
     pipeline_status.update("Audio", 3, "Generating voice audio...", 40)
     print("[ Step 3 / 5 ] — Audio generation (Chatterbox)")
-    generate_audio(script)
+    generate_audio(script, voice_id=voice_id)
 
     # --------------------------------------------------------
     #  STEP 4 — Transcribe
@@ -144,10 +134,8 @@ def run_pipeline(
     #  STEP 5 — Images
     # --------------------------------------------------------
     est_secs = len(prompts) * 45
-    pipeline_status.update("Image Generation", 5,
-                            f"Generating {len(prompts)} images...", 60)
-    print(f"[ Step 5 / 5 ] — Image generation "
-          f"({len(prompts)} images, ~{est_secs // 60}m {est_secs % 60}s)")
+    pipeline_status.update("Image Generation", 5, f"Generating {len(prompts)} images...", 60)
+    print(f"[ Step 5 / 5 ] — Image generation ({len(prompts)} images, ~{est_secs//60}m {est_secs%60}s)")
     image_paths = generate_images(prompts, mode=mode)
 
     # --------------------------------------------------------
@@ -163,16 +151,14 @@ def run_pipeline(
         timestamps=timestamps,
         topic=topic,
         mode=mode,
+        captions=captions,
     )
 
     elapsed = datetime.now() - start_time
-    mins    = int(elapsed.total_seconds() // 60)
-    secs    = int(elapsed.total_seconds() % 60)
-
     print(f"\n{'='*60}")
     print(f"  ✅ PIPELINE COMPLETE!")
     print(f"  Output : {output_path}")
-    print(f"  Time   : {mins}m {secs}s")
+    print(f"  Time   : {int(elapsed.total_seconds()//60)}m {int(elapsed.total_seconds()%60)}s")
     print(f"{'='*60}\n")
 
     if not auto:
@@ -185,15 +171,6 @@ def run_pipeline(
     return output_path
 
 
-def _get_existing_images() -> list[str]:
-    if not os.path.exists(IMAGES_DIR):
-        return []
-    files = [f for f in os.listdir(IMAGES_DIR)
-             if f.lower().endswith((".png", ".jpg", ".jpeg"))]
-    files.sort()
-    return [os.path.join(IMAGES_DIR, f) for f in files]
-
-
 # ------------------------------------------------------------
 #  Entry point
 # ------------------------------------------------------------
@@ -201,14 +178,28 @@ def _get_existing_images() -> list[str]:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("topic", type=str)
-    parser.add_argument("--auto",  action="store_true")
-    parser.add_argument("--mode",  choices=["long", "short"],    default="long")
-    parser.add_argument("--style", choices=["serious", "funny"], default=VIDEO_STYLE)
+    parser.add_argument("--auto",        action="store_true")
+    parser.add_argument("--mode",        choices=["long", "short"],    default="long")
+    parser.add_argument("--style",       choices=["serious", "funny"], default=VIDEO_STYLE)
+    parser.add_argument("--voice",       type=str, default=DEFAULT_VOICE_ID,
+                        help="Voice ID from config.VOICES")
+    parser.add_argument("--no-captions", action="store_true",
+                        help="Disable captions for Shorts")
+    parser.add_argument("--notes",       type=str, default="",
+                        help='Style notes, e.g. "focus on the psychology angle"')
 
     args = parser.parse_args()
 
     try:
-        run_pipeline(topic=args.topic, auto=args.auto, mode=args.mode, style=args.style)
+        run_pipeline(
+            topic=args.topic,
+            auto=args.auto,
+            mode=args.mode,
+            style=args.style,
+            voice_id=args.voice,
+            captions=not args.no_captions,
+            style_notes=args.notes,
+        )
     except KeyboardInterrupt:
         print("\n\n⚠️  Pipeline interrupted by user.")
         sys.exit(0)

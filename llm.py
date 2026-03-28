@@ -1,6 +1,5 @@
 # ============================================================
 #  LLM MODULE — Script + Image Prompt Generation
-#  Uses Ollama running locally on port 11434
 # ============================================================
 
 import os
@@ -10,26 +9,19 @@ import subprocess
 import requests
 from config import (
     OLLAMA_MODEL, OLLAMA_BASE_URL,
-    SCRIPT_SYSTEM_PROMPTS,
-    IMAGE_PROMPT_SYSTEMS,
-    TARGET_LENGTHS,
-    SCRIPT_FILE,
+    SCRIPT_SYSTEM_PROMPTS, IMAGE_PROMPT_SYSTEMS,
+    TARGET_LENGTHS, SCRIPT_FILE,
 )
 
 
-# ------------------------------------------------------------
-#  Helpers
-# ------------------------------------------------------------
-
 def _chat(system: str, user: str) -> str:
-    """Send a single prompt to Ollama and return the response text."""
     url = f"{OLLAMA_BASE_URL}/api/chat"
     payload = {
-        "model": OLLAMA_MODEL,
+        "model":  OLLAMA_MODEL,
         "stream": False,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user",   "content": user}
+            {"role": "user",   "content": user},
         ]
     }
     response = requests.post(url, json=payload, timeout=600)
@@ -38,40 +30,42 @@ def _chat(system: str, user: str) -> str:
 
 
 def split_into_sentences(text: str) -> list[str]:
-    """Split script text into individual sentences."""
     raw = re.split(r'(?<=[.!?])\s+', text.strip())
-    sentences = [s.strip() for s in raw if len(s.strip()) > 10]
-    return sentences
+    return [s.strip() for s in raw if len(s.strip()) > 10]
 
 
 def open_in_notepad(filepath: str):
-    """Open a file in Notepad and wait for the user to close it."""
-    print(f"\n📝 Opening script in Notepad — edit freely, then save and close to continue.\n")
+    print(f"\n📝 Opening script in Notepad — edit freely, then save and close.\n")
     subprocess.run(["notepad.exe", filepath])
 
 
-# ------------------------------------------------------------
-#  Main functions
-# ------------------------------------------------------------
-
 def generate_script(
     topic: str,
-    auto: bool = False,
+    auto:  bool = False,
     research: str = "",
-    mode: str = "long",
+    mode:  str = "long",
     style: str = "serious",
+    style_notes: str = "",
 ) -> str:
     """
-    Generate a narration script for the given topic.
-    mode:  "long" | "short"
-    style: "serious" | "funny"
+    Generate a narration script.
+    style_notes: optional free-text modifier appended to the system prompt,
+                 e.g. "focus on the psychological angle" or "suitable for kids".
     """
     print(f"✍️  Generating script for: '{topic}' [{style} / {mode}]...")
 
-    # Pull the right system prompt and target length
     system_template = SCRIPT_SYSTEM_PROMPTS[style][mode]
     target_length   = TARGET_LENGTHS[style][mode]
-    system          = system_template.format(target_length=target_length)
+
+    # Format style_notes into the prompt placeholder
+    notes_block = ""
+    if style_notes and style_notes.strip():
+        notes_block = f"\nADDITIONAL STYLE NOTES:\n{style_notes.strip()}\n"
+
+    system = system_template.format(
+        target_length=target_length,
+        style_notes=notes_block,
+    )
 
     if research:
         user = (
@@ -85,14 +79,12 @@ def generate_script(
 
     script = _chat(system, user)
 
-    # Save to temp file
     os.makedirs(os.path.dirname(SCRIPT_FILE), exist_ok=True)
     with open(SCRIPT_FILE, "w", encoding="utf-8") as f:
         f.write(script)
 
     print(f"✅ Script generated ({len(script.split())} words)")
 
-    # Checkpoint — open in Notepad for review
     if not auto:
         open_in_notepad(SCRIPT_FILE)
         with open(SCRIPT_FILE, "r", encoding="utf-8") as f:
@@ -104,13 +96,9 @@ def generate_script(
 
 def generate_image_prompts(
     sentences: list[str],
-    auto: bool = False,
-    style: str = "serious",
+    auto:  bool = False,
+    style: str  = "serious",
 ) -> list[str]:
-    """
-    Generate one image generation prompt per sentence.
-    style: "serious" | "funny"
-    """
     BATCH_SIZE  = 10
     all_prompts = []
     batches     = [sentences[i:i+BATCH_SIZE] for i in range(0, len(sentences), BATCH_SIZE)]
@@ -121,7 +109,7 @@ def generate_image_prompts(
     for batch_num, batch in enumerate(batches, 1):
         print(f"   Batch {batch_num}/{len(batches)}...")
         numbered = "\n".join(f"{i+1}. {s}" for i, s in enumerate(batch))
-        user = f"Generate one image prompt for each of these narration sentences:\n\n{numbered}"
+        user     = f"Generate one image prompt for each of these narration sentences:\n\n{numbered}"
 
         raw     = _chat(system, user)
         cleaned = re.sub(r"```json|```", "", raw).strip()
@@ -144,19 +132,16 @@ def generate_image_prompts(
                 print(f"   ⚠️  Batch {batch_num} failed to parse, using fallback prompts")
                 prompts = [_fallback_prompt(style)] * len(batch)
 
-        # Ensure correct count
         while len(prompts) < len(batch):
             prompts.append(_fallback_prompt(style))
         prompts = prompts[:len(batch)]
-
         all_prompts.extend(prompts)
 
     print(f"✅ Image prompts generated")
 
-    # Checkpoint — show prompts for review
     if not auto:
         print("\n" + "="*60)
-        print(f"IMAGE PROMPTS [{style.upper()}] — review before image generation begins:")
+        print(f"IMAGE PROMPTS [{style.upper()}] — review before image generation:")
         print("="*60)
         for i, (sentence, prompt) in enumerate(zip(sentences, all_prompts), 1):
             print(f"\n[{i}] Narration : {sentence[:80]}")
@@ -168,7 +153,6 @@ def generate_image_prompts(
 
 
 def _fallback_prompt(style: str) -> str:
-    """Style-appropriate fallback for when the LLM fails to parse a batch."""
     if style == "funny":
         return (
             "A confused-looking generic person in a mundane setting, "
@@ -178,21 +162,3 @@ def _fallback_prompt(style: str) -> str:
         "A thoughtful scene with natural lighting, cinematic composition, "
         "shallow depth of field, photorealistic."
     )
-
-
-# ------------------------------------------------------------
-#  Entry point for isolated testing
-# ------------------------------------------------------------
-
-if __name__ == "__main__":
-    test_topic = "The Stanford Prison Experiment"
-
-    for style in ("serious", "funny"):
-        print(f"\n{'='*60}")
-        print(f"Testing style: {style.upper()}")
-        print("="*60)
-        script    = generate_script(test_topic, auto=True, mode="long", style=style)
-        sentences = split_into_sentences(script)
-        prompts   = generate_image_prompts(sentences[:3], auto=True, style=style)
-        print(f"Script: {len(script.split())} words, {len(sentences)} sentences")
-        print(f"Sample prompt: {prompts[0]}")
