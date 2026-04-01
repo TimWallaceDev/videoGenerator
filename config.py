@@ -46,6 +46,17 @@ CAPTION_Y_POS      = 0.75
 # Overridden at runtime by the frontend / CLI.
 CAPTIONS_DEFAULT = True
 
+# Caption defaults — all overridable per-video from the UI or CLI
+CAPTION_WORDS    = 2        # words shown per caption chunk (1, 2, or 3)
+CAPTION_POSITION = "bottom" # "top" | "middle" | "bottom"
+
+# Font size presets — maps size label to pixel value
+CAPTION_SIZE_MAP = {
+    "small":  52,
+    "medium": 72,
+    "large":  96,
+}
+
 # --- Pipeline behaviour ---
 AUTO_MODE = False
 

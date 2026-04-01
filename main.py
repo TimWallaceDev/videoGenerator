@@ -21,6 +21,7 @@ from config import (
     TEMP_DIR, OUTPUT_DIR, IMAGES_DIR,
     TIMESTAMPS_FILE, AUDIO_FILE, VIDEO_CONFIGS,
     VIDEO_STYLE, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT,
+    CAPTION_WORDS, CAPTION_POSITION,
 )
 
 
@@ -48,26 +49,35 @@ def clear_state():
 # ------------------------------------------------------------
 
 def run_pipeline(
-    topic:    str,
-    auto:     bool = False,
-    mode:     str  = "long",
-    style:    str  = "serious",
-    voice_id: str  = None,
-    captions: bool = None,
-    style_notes: str = "",
+    topic:            str,
+    auto:             bool = False,
+    mode:             str  = "long",
+    style:            str  = "serious",
+    voice_id:         str  = None,
+    captions:         bool = None,
+    caption_words:    int  = None,
+    caption_size:     str  = None,
+    caption_position: str  = None,
+    style_notes:      str  = "",
 ):
     """
     Full pipeline from topic string to finished .mp4.
 
-    voice_id : ID from config.VOICES. Defaults to DEFAULT_VOICE_ID.
-    captions : Whether to burn in duo captions (Shorts only).
-               Defaults to CAPTIONS_DEFAULT from config.
-    style_notes: Optional free-text modifier appended to the script prompt.
+    voice_id         : ID from config.VOICES. Defaults to DEFAULT_VOICE_ID.
+    captions         : Whether to burn in captions (Shorts only).
+    caption_words    : Words per caption chunk (1-3).
+    caption_size     : "small" | "medium" | "large"
+    caption_position : "top" | "middle" | "bottom"
+    style_notes      : Optional free-text modifier appended to the script prompt.
     """
     if voice_id is None:
         voice_id = DEFAULT_VOICE_ID
     if captions is None:
         captions = CAPTIONS_DEFAULT
+    if caption_words is None:
+        caption_words = CAPTION_WORDS
+    if caption_position is None:
+        caption_position = CAPTION_POSITION
 
     cfg        = VIDEO_CONFIGS[mode]
     start_time = datetime.now()
@@ -81,7 +91,7 @@ def run_pipeline(
     print(f"  Mode     : {'AUTO' if auto else 'MANUAL'} | {mode.upper()} ({cfg['width']}x{cfg['height']})")
     print(f"  Style    : {style.upper()}")
     print(f"  Voice    : {voice_id}")
-    print(f"  Captions : {captions}")
+    print(f"  Captions : {captions}" + (f" | {caption_words}w | {caption_size or 'medium'} | {caption_position}" if captions and mode == "short" else ""))
     if style_notes:
         print(f"  Notes    : {style_notes}")
     print(f"  Time     : {start_time.strftime('%H:%M:%S')}")
@@ -152,6 +162,9 @@ def run_pipeline(
         topic=topic,
         mode=mode,
         captions=captions,
+        caption_words=caption_words,
+        caption_size=caption_size,
+        caption_position=caption_position,
     )
 
     elapsed = datetime.now() - start_time
@@ -183,8 +196,14 @@ if __name__ == "__main__":
     parser.add_argument("--style",       choices=["serious", "funny"], default=VIDEO_STYLE)
     parser.add_argument("--voice",       type=str, default=DEFAULT_VOICE_ID,
                         help="Voice ID from config.VOICES")
-    parser.add_argument("--no-captions", action="store_true",
+    parser.add_argument("--no-captions",      action="store_true",
                         help="Disable captions for Shorts")
+    parser.add_argument("--caption-words",    type=int, default=None, choices=[1,2,3],
+                        help="Words per caption chunk (default: 2)")
+    parser.add_argument("--caption-size",     type=str, default=None,
+                        choices=["small","medium","large"])
+    parser.add_argument("--caption-position", type=str, default=None,
+                        choices=["top","middle","bottom"])
     parser.add_argument("--notes",       type=str, default="",
                         help='Style notes, e.g. "focus on the psychology angle"')
 
@@ -198,6 +217,9 @@ if __name__ == "__main__":
             style=args.style,
             voice_id=args.voice,
             captions=not args.no_captions,
+            caption_words=args.caption_words,
+            caption_size=args.caption_size,
+            caption_position=args.caption_position,
             style_notes=args.notes,
         )
     except KeyboardInterrupt:

@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from main   import run_pipeline
 from status import pipeline_status
-from config import OUTPUT_DIR, BASE_DIR, VOICES, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT
+from config import OUTPUT_DIR, BASE_DIR, VOICES, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT, CAPTION_WORDS, CAPTION_POSITION
 import comfyui
 
 app = FastAPI(title="Video Pipeline")
@@ -38,59 +38,71 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 class QueueItem:
     def __init__(
         self,
-        topic:       str,
-        mode:        str  = "long",
-        style:       str  = "serious",
-        voice_id:    str  = None,
-        captions:    bool = None,
-        style_notes: str  = "",
-        item_id:     str  = None,
-        added_at:    str  = None,
-        status:      str  = "queued",
-        output:      str  = None,
-        error:       str  = None,
+        topic:            str,
+        mode:             str  = "long",
+        style:            str  = "serious",
+        voice_id:         str  = None,
+        captions:         bool = None,
+        caption_words:    int  = None,
+        caption_size:     str  = "medium",
+        caption_position: str  = None,
+        style_notes:      str  = "",
+        item_id:          str  = None,
+        added_at:         str  = None,
+        status:           str  = "queued",
+        output:           str  = None,
+        error:            str  = None,
     ):
-        self.id          = item_id or str(uuid.uuid4())[:8]
-        self.topic       = topic
-        self.mode        = mode
-        self.style       = style
-        self.voice_id    = voice_id    or DEFAULT_VOICE_ID
-        self.captions    = captions    if captions is not None else CAPTIONS_DEFAULT
-        self.style_notes = style_notes or ""
-        self.status      = status
-        self.added_at    = added_at or datetime.now().isoformat()
-        self.output      = output
-        self.error       = error
+        self.id               = item_id or str(uuid.uuid4())[:8]
+        self.topic            = topic
+        self.mode             = mode
+        self.style            = style
+        self.voice_id         = voice_id         or DEFAULT_VOICE_ID
+        self.captions         = captions         if captions is not None else CAPTIONS_DEFAULT
+        self.caption_words    = caption_words    or CAPTION_WORDS
+        self.caption_size     = caption_size     or "medium"
+        self.caption_position = caption_position or CAPTION_POSITION
+        self.style_notes      = style_notes      or ""
+        self.status           = status
+        self.added_at         = added_at or datetime.now().isoformat()
+        self.output           = output
+        self.error            = error
 
     def to_dict(self) -> dict:
         return {
-            "id":          self.id,
-            "topic":       self.topic,
-            "mode":        self.mode,
-            "style":       self.style,
-            "voice_id":    self.voice_id,
-            "captions":    self.captions,
-            "style_notes": self.style_notes,
-            "status":      self.status,
-            "added_at":    self.added_at,
-            "output":      self.output,
-            "error":       self.error,
+            "id":               self.id,
+            "topic":            self.topic,
+            "mode":             self.mode,
+            "style":            self.style,
+            "voice_id":         self.voice_id,
+            "captions":         self.captions,
+            "caption_words":    self.caption_words,
+            "caption_size":     self.caption_size,
+            "caption_position": self.caption_position,
+            "style_notes":      self.style_notes,
+            "status":           self.status,
+            "added_at":         self.added_at,
+            "output":           self.output,
+            "error":            self.error,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "QueueItem":
         return cls(
-            topic       = d["topic"],
-            mode        = d.get("mode",        "long"),
-            style       = d.get("style",       "serious"),
-            voice_id    = d.get("voice_id",    DEFAULT_VOICE_ID),
-            captions    = d.get("captions",    CAPTIONS_DEFAULT),
-            style_notes = d.get("style_notes", ""),
-            item_id     = d.get("id"),
-            added_at    = d.get("added_at"),
-            status      = d.get("status",      "queued"),
-            output      = d.get("output"),
-            error       = d.get("error"),
+            topic            = d["topic"],
+            mode             = d.get("mode",             "long"),
+            style            = d.get("style",            "serious"),
+            voice_id         = d.get("voice_id",         DEFAULT_VOICE_ID),
+            captions         = d.get("captions",         CAPTIONS_DEFAULT),
+            caption_words    = d.get("caption_words",    CAPTION_WORDS),
+            caption_size     = d.get("caption_size",     "medium"),
+            caption_position = d.get("caption_position", CAPTION_POSITION),
+            style_notes      = d.get("style_notes",      ""),
+            item_id          = d.get("id"),
+            added_at         = d.get("added_at"),
+            status           = d.get("status",           "queued"),
+            output           = d.get("output"),
+            error            = d.get("error"),
         )
 
 
@@ -181,6 +193,9 @@ def queue_worker():
                 style=item.style,
                 voice_id=item.voice_id,
                 captions=item.captions,
+                caption_words=item.caption_words,
+                caption_size=item.caption_size,
+                caption_position=item.caption_position,
                 style_notes=item.style_notes,
             )
             item.status = "done"
@@ -213,12 +228,15 @@ def start_worker():
 # ============================================================
 
 class TopicRequest(BaseModel):
-    topic:       str
-    mode:        str  = "long"
-    style:       str  = "serious"
-    voice_id:    str  = DEFAULT_VOICE_ID
-    captions:    bool = CAPTIONS_DEFAULT
-    style_notes: str  = ""
+    topic:            str
+    mode:             str  = "long"
+    style:            str  = "serious"
+    voice_id:         str  = DEFAULT_VOICE_ID
+    captions:         bool = CAPTIONS_DEFAULT
+    caption_words:    int  = CAPTION_WORDS
+    caption_size:     str  = "medium"
+    caption_position: str  = CAPTION_POSITION
+    style_notes:      str  = ""
 
 
 @app.on_event("startup")
@@ -268,7 +286,11 @@ def add_to_queue(req: TopicRequest):
 
     item = QueueItem(
         topic=topic, mode=mode, style=style,
-        voice_id=voice_id, captions=req.captions,
+        voice_id=voice_id,
+        captions=req.captions,
+        caption_words=req.caption_words,
+        caption_size=req.caption_size,
+        caption_position=req.caption_position,
         style_notes=req.style_notes,
     )
     with queue_lock:

@@ -27,6 +27,9 @@ from config import (
     CAPTION_OUTLINE,
     CAPTION_OUTLINE_PX,
     CAPTION_Y_POS,
+    CAPTION_WORDS,
+    CAPTION_POSITION,
+    CAPTION_SIZE_MAP,
 )
 
 ZOOM_START = 1.0
@@ -69,25 +72,47 @@ def _sanitize_caption(text: str) -> str:
     return text.strip()
 
 
-def _build_duo_captions(words: list[dict], audio_duration: float, height: int) -> list[str]:
+# Caption position presets — fraction of video height
+CAPTION_Y_PRESETS = {
+    "top":    0.10,
+    "middle": 0.45,
+    "bottom": 0.75,
+}
+
+
+def _build_duo_captions(
+    words: list[dict],
+    audio_duration: float,
+    height: int,
+    words_per_caption: int = None,
+    font_size: int = None,
+    position: str = None,
+) -> list[str]:
     """
-    Build ffmpeg drawtext filter fragments for duo-style captions.
-    Two words shown at a time, horizontally centered, bottom third.
-    Returns a list of drawtext=... strings to be comma-joined into a filter chain.
+    Build ffmpeg drawtext filter fragments for caption overlay.
+
+    words_per_caption : how many words to show at a time (1, 2, or 3)
+    font_size         : pixel size override (uses config default if None)
+    position          : "top" | "middle" | "bottom" (uses config default if None)
     """
     if not words:
         return []
 
-    y_pos = int(height * CAPTION_Y_POS)
+    n      = max(1, min(3, words_per_caption or CAPTION_WORDS))
+    fsize  = font_size or CAPTION_FONT_SIZE
+    pos    = position or CAPTION_POSITION
+    y_frac = CAPTION_Y_PRESETS.get(pos, CAPTION_Y_PRESETS["bottom"])
+    y_pos  = int(height * y_frac)
+
     filters = []
 
-    for i in range(0, len(words), 2):
-        chunk = words[i:i + 2]
+    for i in range(0, len(words), n):
+        chunk = words[i:i + n]
         text  = " ".join(w["word"].strip() for w in chunk)
         start = chunk[0]["start"]
 
-        if i + 2 < len(words):
-            end = words[i + 2]["start"]
+        if i + n < len(words):
+            end = words[i + n]["start"]
         else:
             end = chunk[-1]["end"]
 
@@ -104,7 +129,7 @@ def _build_duo_captions(words: list[dict], audio_duration: float, height: int) -
             f"fontfile={FONT_PATH_ESCAPED}:"
             f"text='{clean}':"
             f"fontcolor={CAPTION_COLOR}:"
-            f"fontsize={CAPTION_FONT_SIZE}:"
+            f"fontsize={fsize}:"
             f"borderw={CAPTION_OUTLINE_PX}:"
             f"bordercolor={CAPTION_OUTLINE}:"
             f"x=(w-text_w)/2:"
@@ -261,10 +286,16 @@ def assemble_video(
     topic: str = "video",
     mode: str = "long",
     captions: bool = True,
+    caption_words: int = None,
+    caption_size: str = None,
+    caption_position: str = None,
 ) -> str:
     """
     Assemble the final video from images, audio, and timestamps.
-    captions: if True and mode='short', duo captions are burned in from words.json.
+    captions         : burn in captions for Shorts
+    caption_words    : words per caption chunk (1-3)
+    caption_size     : "small" | "medium" | "large"
+    caption_position : "top" | "middle" | "bottom"
     """
     if audio_path  is None: audio_path  = AUDIO_FILE
     if timestamps  is None: timestamps  = _load_timestamps()
@@ -298,7 +329,13 @@ def assemble_video(
     if mode == "short" and captions:
         words = _load_words()
         if words:
-            caption_filters = _build_duo_captions(words, audio_duration, cfg["height"])
+            font_size = CAPTION_SIZE_MAP.get(caption_size or "medium", CAPTION_FONT_SIZE)
+            caption_filters = _build_duo_captions(
+                words, audio_duration, cfg["height"],
+                words_per_caption=caption_words,
+                font_size=font_size,
+                position=caption_position,
+            )
 
     use_captions = bool(caption_filters)
     final_label  = "precaption" if use_captions else "outv"
@@ -313,7 +350,8 @@ def assemble_video(
         # Append: [precaption] → drawtext chain → [outv]
         caption_chain  = "[precaption]" + ",".join(caption_filters) + "[outv]"
         filter_complex = filter_complex + ";\n" + caption_chain
-        print(f"   Captions  : {len(caption_filters)} duo pairs")
+        sz = caption_size or "medium"
+        print(f"   Captions  : {len(caption_filters)} chunks ({caption_words or CAPTION_WORDS}w, {sz}, {caption_position or CAPTION_POSITION})")
     elif mode == "short":
         print(f"   Captions  : skipped (words.json not found or empty)")
 
