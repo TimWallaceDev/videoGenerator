@@ -47,6 +47,7 @@ class QueueItem:
         caption_size:     str  = "medium",
         caption_position: str  = None,
         style_notes:      str  = "",
+        script:           str  = "",
         item_id:          str  = None,
         added_at:         str  = None,
         status:           str  = "queued",
@@ -63,6 +64,7 @@ class QueueItem:
         self.caption_size     = caption_size     or "medium"
         self.caption_position = caption_position or CAPTION_POSITION
         self.style_notes      = style_notes      or ""
+        self.script           = script           or ""
         self.status           = status
         self.added_at         = added_at or datetime.now().isoformat()
         self.output           = output
@@ -80,6 +82,7 @@ class QueueItem:
             "caption_size":     self.caption_size,
             "caption_position": self.caption_position,
             "style_notes":      self.style_notes,
+            "script":           self.script,
             "status":           self.status,
             "added_at":         self.added_at,
             "output":           self.output,
@@ -97,7 +100,8 @@ class QueueItem:
             caption_words    = d.get("caption_words",    CAPTION_WORDS),
             caption_size     = d.get("caption_size",     "medium"),
             caption_position = d.get("caption_position", CAPTION_POSITION),
-            style_notes      = d.get("style_notes",      ""),
+            style_notes      = d.get("style_notes", ""),
+            script           = d.get("script",     ""),
             item_id          = d.get("id"),
             added_at         = d.get("added_at"),
             status           = d.get("status",           "queued"),
@@ -197,6 +201,7 @@ def queue_worker():
                 caption_size=item.caption_size,
                 caption_position=item.caption_position,
                 style_notes=item.style_notes,
+                script=item.script or None,
             )
             item.status = "done"
             item.output = output_path
@@ -237,6 +242,7 @@ class TopicRequest(BaseModel):
     caption_size:     str  = "medium"
     caption_position: str  = CAPTION_POSITION
     style_notes:      str  = ""
+    script:           str  = ""
 
 
 @app.on_event("startup")
@@ -292,6 +298,7 @@ def add_to_queue(req: TopicRequest):
         caption_size=req.caption_size,
         caption_position=req.caption_position,
         style_notes=req.style_notes,
+        script=req.script,
     )
     with queue_lock:
         queue.append(item)

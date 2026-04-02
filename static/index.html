@@ -187,6 +187,58 @@
   .notes-input:focus { border-color: var(--accent4); }
   .notes-input::placeholder { color: var(--muted); font-style: italic; }
 
+  /* Input mode tabs */
+  .input-tabs { display: flex; margin-bottom: -1px; }
+
+  .input-tab {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 6px 16px;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: var(--bg);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .input-tab:first-child { border-right: none; }
+
+  .input-tab.active {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border);
+  }
+
+  .input-pane { display: none; }
+  .input-pane.active { display: flex; flex-direction: column; gap: 8px; }
+
+  textarea.script-input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 12px 16px;
+    resize: vertical;
+    min-height: 140px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+
+  textarea.script-input:focus { border-color: var(--accent); }
+  textarea.script-input::placeholder { color: var(--muted); font-style: italic; }
+
+  .script-meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
   .btn {
     background: var(--accent);
     color: #000;
@@ -436,14 +488,35 @@
   <!-- Submit panel -->
   <div class="submit-panel">
 
-    <!-- Topic input -->
+    <!-- Input mode: Prompt or Script -->
     <div>
-      <label class="field-label">Topic</label>
-      <div class="input-row">
-        <input type="text" id="topicInput"
-          placeholder='e.g. "Why we self-sabotage" or "The time a beaver caused an international incident"'
-          onkeydown="if(event.key==='Enter') submitTopic()">
-        <button class="btn" onclick="submitTopic()">QUEUE IT</button>
+      <div class="input-tabs">
+        <button class="input-tab active" id="tabPrompt" onclick="setInputMode('prompt')">💬 PROMPT</button>
+        <button class="input-tab"        id="tabScript" onclick="setInputMode('script')">📄 SCRIPT</button>
+      </div>
+
+      <!-- Prompt mode -->
+      <div class="input-pane active" id="panePrompt">
+        <div class="input-row">
+          <input type="text" id="topicInput"
+            placeholder='e.g. "Why we self-sabotage" or "The time a beaver caused an international incident"'
+            onkeydown="if(event.key==='Enter') submitTopic()">
+          <button class="btn" onclick="submitTopic()">QUEUE IT</button>
+        </div>
+      </div>
+
+      <!-- Script mode -->
+      <div class="input-pane" id="paneScript">
+        <input type="text" id="topicInputScript"
+          placeholder="Video title / topic label (used for filename)"
+          style="background:var(--surface);border:1px solid var(--border);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14px;padding:10px 14px;outline:none;width:100%;margin-bottom:2px;"
+          onkeydown="">
+        <textarea class="script-input" id="scriptInput"
+          placeholder="Paste your script here. It will be used exactly as written — no rewriting, no research.&#10;&#10;Each sentence becomes one image. Keep sentences complete thoughts."></textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span class="script-meta" id="scriptMeta">0 words · 0 sentences</span>
+          <button class="btn" onclick="submitTopic()">QUEUE IT</button>
+        </div>
       </div>
     </div>
 
@@ -564,6 +637,31 @@
   let currentCapPos     = 'bottom';
   let voices            = [];
 
+  // ---- Input mode ----
+  let currentInputMode = 'prompt';
+
+  function setInputMode(mode) {
+    currentInputMode = mode;
+    document.getElementById('tabPrompt').className = 'input-tab' + (mode === 'prompt' ? ' active' : '');
+    document.getElementById('tabScript').className = 'input-tab' + (mode === 'script' ? ' active' : '');
+    document.getElementById('panePrompt').className = 'input-pane' + (mode === 'prompt' ? ' active' : '');
+    document.getElementById('paneScript').className = 'input-pane' + (mode === 'script' ? ' active' : '');
+  }
+
+  // Live word/sentence counter for script textarea
+  document.addEventListener('DOMContentLoaded', () => {
+    const ta = document.getElementById('scriptInput');
+    if (ta) {
+      ta.addEventListener('input', () => {
+        const text = ta.value.trim();
+        const words = text ? text.split(/\s+/).length : 0;
+        const sentences = text ? (text.match(/[.!?]+/g) || []).length : 0;
+        document.getElementById('scriptMeta').textContent =
+          `${words} words · ${sentences} sentences`;
+      });
+    }
+  });
+
   // ---- Init voices ----
   async function loadVoices() {
     try {
@@ -636,8 +734,17 @@
 
   // ---- Submit ----
   async function submitTopic() {
-    const topic = document.getElementById('topicInput').value.trim();
-    if (!topic) return;
+    let topic, script = "";
+
+    if (currentInputMode === 'script') {
+      topic  = document.getElementById('topicInputScript').value.trim();
+      script = document.getElementById('scriptInput').value.trim();
+      if (!topic) { showToast('Add a title/label for the video'); return; }
+      if (!script) { showToast('Script is empty'); return; }
+    } else {
+      topic = document.getElementById('topicInput').value.trim();
+      if (!topic) return;
+    }
 
     const voice_id    = document.getElementById('voiceSelect').value;
     const style_notes = document.getElementById('notesInput').value.trim();
@@ -656,13 +763,18 @@
           caption_size:     currentCapSize,
           caption_position: currentCapPos,
           style_notes,
+          script,
         })
       });
       const data = await res.json();
-      document.getElementById('topicInput').value  = '';
-      document.getElementById('notesInput').value  = '';
+      document.getElementById('topicInput').value       = '';
+      document.getElementById('topicInputScript').value = '';
+      document.getElementById('scriptInput').value      = '';
+      document.getElementById('notesInput').value       = '';
+      document.getElementById('scriptMeta').textContent = '0 words · 0 sentences';
       const icons = (currentMode === 'short' ? '📱' : '🎬') + (currentStyle === 'funny' ? '😄' : '🎙');
-      showToast(`${icons} Added at position ${data.position}`);
+      const srcIcon = currentInputMode === 'script' ? ' 📄' : '';
+      showToast(`${icons}${srcIcon} Added at position ${data.position}`);
       refreshQueue();
     } catch(e) {
       showToast('Failed to add topic');
@@ -699,6 +811,8 @@
         const notes = item.style_notes ? `<div class="notes-preview">"${escHtml(item.style_notes)}"</div>` : '';
         const capBadge = item.mode === 'short' && item.captions
           ? `<span class="badge cap-b">CC</span>` : '';
+        const scriptBadge = item.script
+          ? `<span class="badge" style="background:#1a1a2e;color:#7070ff;font-size:9px;padding:2px 7px;">📄 SCRIPT</span>` : '';
 
         return `
           <div class="queue-item">
@@ -707,6 +821,7 @@
             <span class="badge ${item.mode === 'short' ? 'short-b' : 'long-b'}">${item.mode === 'short' ? '📱' : '🎬'} ${item.mode}</span>
             <span class="badge ${item.style === 'funny' ? 'funny-b' : 'serious-b'}">${item.style === 'funny' ? '😄' : '🎙'} ${item.style}</span>
             ${capBadge}
+            ${scriptBadge}
             <span class="badge voice-b">${escHtml(voiceLabel)}</span>
             <span class="badge ${item.status}">${item.status}</span>
             ${item.status === 'queued' ? `<button class="btn danger" onclick="removeFromQueue('${item.id}')">✕</button>` : ''}

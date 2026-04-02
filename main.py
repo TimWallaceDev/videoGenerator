@@ -59,6 +59,7 @@ def run_pipeline(
     caption_size:     str  = None,
     caption_position: str  = None,
     style_notes:      str  = "",
+    script:           str  = None,
 ):
     """
     Full pipeline from topic string to finished .mp4.
@@ -69,6 +70,8 @@ def run_pipeline(
     caption_size     : "small" | "medium" | "large"
     caption_position : "top" | "middle" | "bottom"
     style_notes      : Optional free-text modifier appended to the script prompt.
+    script           : If provided, skip research + LLM script generation entirely
+                       and use this text as the script verbatim.
     """
     if voice_id is None:
         voice_id = DEFAULT_VOICE_ID
@@ -92,6 +95,8 @@ def run_pipeline(
     print(f"  Style    : {style.upper()}")
     print(f"  Voice    : {voice_id}")
     print(f"  Captions : {captions}" + (f" | {caption_words}w | {caption_size or 'medium'} | {caption_position}" if captions and mode == "short" else ""))
+    if script:
+        print(f"  Script   : provided ({len(script.split())} words)")
     if style_notes:
         print(f"  Notes    : {style_notes}")
     print(f"  Time     : {start_time.strftime('%H:%M:%S')}")
@@ -102,16 +107,22 @@ def run_pipeline(
     os.makedirs(IMAGES_DIR, exist_ok=True)
 
     # --------------------------------------------------------
-    #  STEP 1 — Research + Script
+    #  STEP 1 — Research + Script (skipped if script provided)
     # --------------------------------------------------------
-    pipeline_status.update("Research + Script", 1, "Researching topic...", 5)
-    print("[ Step 1 / 5 ] — Research + Script generation")
-    research = research_topic(topic)
-    script   = generate_script(
-        topic, auto=auto, research=research,
-        mode=mode, style=style, style_notes=style_notes,
-    )
-    save_state({"script": script, "style": style})
+    if script:
+        pipeline_status.update("Script", 1, "Using provided script", 20)
+        print("[ Step 1 / 5 ] — Script (provided, skipping research + generation)")
+        # Normalise line endings and strip leading/trailing whitespace
+        script = script.strip()
+    else:
+        pipeline_status.update("Research + Script", 1, "Researching topic...", 5)
+        print("[ Step 1 / 5 ] — Research + Script generation")
+        research = research_topic(topic)
+        script   = generate_script(
+            topic, auto=auto, research=research,
+            mode=mode, style=style, style_notes=style_notes,
+        )
+        save_state({"script": script, "style": style})
 
     sentences = split_into_sentences(script)
     print(f"             {len(script.split())} words, {len(sentences)} sentences\n")
@@ -121,7 +132,8 @@ def run_pipeline(
     # --------------------------------------------------------
     pipeline_status.update("Image Prompts", 2, "Generating prompts...", 25)
     print("[ Step 2 / 5 ] — Image prompt generation")
-    checkpoint("Review script before generating image prompts", auto)
+    if not script:
+        checkpoint("Review script before generating image prompts", auto)
     prompts = generate_image_prompts(sentences, auto=auto, style=style)
     print(f"             {len(prompts)} prompts\n")
     checkpoint("Review image prompts before starting image generation", auto)
@@ -196,6 +208,8 @@ if __name__ == "__main__":
     parser.add_argument("--style",       choices=["serious", "funny"], default=VIDEO_STYLE)
     parser.add_argument("--voice",       type=str, default=DEFAULT_VOICE_ID,
                         help="Voice ID from config.VOICES")
+    parser.add_argument("--script",            type=str, default=None,
+                        help="Path to a .txt file containing the script to use verbatim")
     parser.add_argument("--no-captions",      action="store_true",
                         help="Disable captions for Shorts")
     parser.add_argument("--caption-words",    type=int, default=None, choices=[1,2,3],
@@ -210,6 +224,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
+        # Load script from file if --script path provided
+        provided_script = None
+        if args.script:
+            with open(args.script, "r", encoding="utf-8") as f:
+                provided_script = f.read()
+
         run_pipeline(
             topic=args.topic,
             auto=args.auto,
@@ -221,6 +241,7 @@ if __name__ == "__main__":
             caption_size=args.caption_size,
             caption_position=args.caption_position,
             style_notes=args.notes,
+            script=provided_script,
         )
     except KeyboardInterrupt:
         print("\n\n⚠️  Pipeline interrupted by user.")
