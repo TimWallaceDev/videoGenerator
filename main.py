@@ -21,7 +21,7 @@ from config import (
     TEMP_DIR, OUTPUT_DIR, IMAGES_DIR,
     TIMESTAMPS_FILE, AUDIO_FILE, VIDEO_CONFIGS,
     VIDEO_STYLE, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT,
-    CAPTION_WORDS, CAPTION_POSITION,
+    CAPTION_WORDS, CAPTION_POSITION, DEFAULT_MUSIC_ID
 )
 
 
@@ -60,6 +60,7 @@ def run_pipeline(
     caption_position: str  = None,
     style_notes:      str  = "",
     script:           str  = None,
+    music_id:         str  = None,
 ):
     """
     Full pipeline from topic string to finished .mp4.
@@ -81,6 +82,8 @@ def run_pipeline(
         caption_words = CAPTION_WORDS
     if caption_position is None:
         caption_position = CAPTION_POSITION
+    if music_id is None:
+        music_id = DEFAULT_MUSIC_ID
 
     cfg        = VIDEO_CONFIGS[mode]
     start_time = datetime.now()
@@ -177,6 +180,7 @@ def run_pipeline(
         caption_words=caption_words,
         caption_size=caption_size,
         caption_position=caption_position,
+        music_id=music_id,
     )
 
     elapsed = datetime.now() - start_time

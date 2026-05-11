@@ -3,6 +3,7 @@
 # ============================================================
 
 import os
+import glob
 
 # --- Paths ---
 BASE_DIR        = os.path.expanduser("~/videoGenerator")
@@ -311,7 +312,7 @@ _LENGTH_SERIOUS_LONG = (
 )
 
 _LENGTH_SERIOUS_SHORT = (
-    "45 to 60 seconds of spoken narration — approximately one hundred to one "
+    "20 to 40 seconds of spoken narration — approximately one hundred to one "
     "hundred and twenty words total. Not a word more. "
     "This is a single dramatic beat, not a full story. "
     "Write the minimum number of sentences needed to deliver maximum impact."
@@ -327,7 +328,7 @@ _LENGTH_FUNNY_LONG = (
 )
 
 _LENGTH_FUNNY_SHORT = (
-    "40 to 55 seconds of spoken narration — approximately ninety to one hundred "
+    "20 to 40 seconds of spoken narration — approximately ninety to one hundred "
     "and ten words total. Punchy and tight. "
     "One setup, one payoff, one perfect send-off line."
 )
@@ -414,3 +415,56 @@ TARGET_LENGTHS = {
         "short": _LENGTH_FUNNY_SHORT,
     },
 }
+
+# ============================================================
+#  MUSIC — Background music settings
+#  Add this block to the bottom of config.py
+# ============================================================
+
+MUSIC_DIR           = os.path.join(BASE_DIR, "music")
+MUSIC_VOLUME        = 0.09          # 0.0–1.0, subtle bed level
+MUSIC_FADE_DURATION = 3.0           # seconds for fade in / fade out
+DEFAULT_MUSIC_ID    = "none"        # "none" = no music
+
+# Supported audio formats for music files
+MUSIC_EXTENSIONS    = {".mp3", ".wav", ".flac", ".m4a", ".ogg"}
+
+
+def get_music_tracks() -> list[dict]:
+    """
+    Scan MUSIC_DIR and return a list of track dicts.
+    Each dict has: id (filename stem), label (display name), file (full path).
+    Always prepends a "No Music" option.
+    """
+    tracks = [{"id": "none", "label": "No Music", "file": None}]
+
+    if not os.path.isdir(MUSIC_DIR):
+        return tracks
+
+    found = []
+    for ext in MUSIC_EXTENSIONS:
+        found.extend(glob.glob(os.path.join(MUSIC_DIR, f"*{ext}")))
+        found.extend(glob.glob(os.path.join(MUSIC_DIR, f"*{ext.upper()}")))
+
+    # Sort alphabetically, deduplicate
+    seen = set()
+    for path in sorted(found):
+        norm = os.path.normcase(path)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        stem  = os.path.splitext(os.path.basename(path))[0]
+        label = stem.replace("_", " ").replace("-", " ").title()
+        tracks.append({"id": stem, "label": label, "file": path})
+
+    return tracks
+
+
+def get_music_file(music_id: str) -> str | None:
+    """Return the full path for a music_id, or None if 'none' / not found."""
+    if music_id == "none" or not music_id:
+        return None
+    for track in get_music_tracks():
+        if track["id"] == music_id:
+            return track["file"]
+    return None

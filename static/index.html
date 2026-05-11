@@ -400,6 +400,7 @@
   .badge.funny-b  { background: var(--accent4); color: #000; }
   .badge.cap-b    { background: var(--success); color: #000; }
   .badge.voice-b  { background: #2a2a2a; color: #aaa; }
+  .badge.music-b  { background: #1a1a2e; color: #9090ff; }
 
   .video-item {
     background: var(--surface);
@@ -467,6 +468,24 @@
 
   .caption-settings.visible { display: flex; }
 
+  /* Trending buttons */
+  .trend-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .trend-btn:hover  { border-color: var(--accent); color: var(--text); }
+  .trend-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(232,255,0,0.06); }
+  .trend-btn.loading { opacity: 0.5; cursor: wait; }
+
   @keyframes flicker {
     0%, 100% { opacity: 1; } 92% { opacity: 1; }
     93% { opacity: 0.8; } 94% { opacity: 1; }
@@ -502,6 +521,13 @@
             placeholder='e.g. "Why we self-sabotage" or "The time a beaver caused an international incident"'
             onkeydown="if(event.key==='Enter') submitTopic()">
           <button class="btn" onclick="submitTopic()">QUEUE IT</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;white-space:nowrap;">🔥 Trending</span>
+          <button class="trend-btn" id="trendCA"     onclick="fetchTrend('CA')">🇨🇦 CA</button>
+          <button class="trend-btn" id="trendUS"     onclick="fetchTrend('US')">🇺🇸 US</button>
+          <button class="trend-btn" id="trendGLOBAL" onclick="fetchTrend('GLOBAL')">🌍 WORLD</button>
+          <span id="trendMeta" style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted);margin-left:4px;"></span>
         </div>
       </div>
 
@@ -554,6 +580,12 @@
       <div class="control-group">
         <label class="field-label">Voice</label>
         <select id="voiceSelect"></select>
+      </div>
+
+      <!-- Music -->
+      <div class="control-group">
+        <label class="field-label">Music</label>
+        <select id="musicSelect"></select>
       </div>
 
       <!-- Style notes -->
@@ -636,6 +668,14 @@
   let currentCapSize    = 'medium';
   let currentCapPos     = 'bottom';
   let voices            = [];
+  let musicTracks       = [];
+
+  // Trending state — tracks current list and position per region
+  const trendState = {
+    US:     { topics: [], index: 0, fetching: false },
+    CA:     { topics: [], index: 0, fetching: false },
+    GLOBAL: { topics: [], index: 0, fetching: false },
+  };
 
   // ---- Input mode ----
   let currentInputMode = 'prompt';
@@ -662,6 +702,64 @@
     }
   });
 
+  // ---- Trending ----
+  let activeTrendRegion = null;  // which region button is currently "active"
+
+  async function fetchTrend(region) {
+    const state = trendState[region];
+    const btn   = document.getElementById('trend' + region);
+    const meta  = document.getElementById('trendMeta');
+
+    // If switching regions, reset the other region's index
+    if (activeTrendRegion && activeTrendRegion !== region) {
+      trendState[activeTrendRegion].index = 0;
+      const oldBtn = document.getElementById('trend' + activeTrendRegion);
+      if (oldBtn) oldBtn.classList.remove('active');
+    }
+    activeTrendRegion = region;
+
+    // If we already have topics cached in JS, just advance the index
+    if (state.topics.length > 0) {
+      state.index = (state.index + 1) % state.topics.length;
+      const topic = state.topics[state.index];
+      document.getElementById('topicInput').value = topic;
+      meta.textContent = `${state.index + 1} / ${state.topics.length}`;
+      btn.classList.add('active');
+      return;
+    }
+
+    // First click for this region — fetch from server
+    if (state.fetching) return;
+    state.fetching = true;
+    btn.classList.add('loading');
+    btn.classList.remove('active');
+    meta.textContent = 'fetching…';
+
+    try {
+      const res  = await fetch(`/trends?region=${region}`);
+      const data = await res.json();
+
+      if (data.error || !data.topics || data.topics.length === 0) {
+        meta.textContent = 'no results';
+        showToast('Could not fetch trends — try again shortly');
+        return;
+      }
+
+      state.topics = data.topics;
+      state.index  = 0;
+      document.getElementById('topicInput').value = state.topics[0];
+      meta.textContent = `1 / ${state.topics.length}`;
+      btn.classList.add('active');
+
+    } catch(e) {
+      meta.textContent = 'error';
+      showToast('Trends fetch failed');
+    } finally {
+      state.fetching = false;
+      btn.classList.remove('loading');
+    }
+  }
+
   // ---- Init voices ----
   async function loadVoices() {
     try {
@@ -674,6 +772,24 @@
       ).join('');
     } catch(e) {
       console.error('Could not load voices', e);
+    }
+  }
+
+  // ---- Init music ----
+  async function loadMusic() {
+    try {
+      const res  = await fetch('/music');
+      const data = await res.json();
+      musicTracks = data.tracks;
+      const sel = document.getElementById('musicSelect');
+      sel.innerHTML = musicTracks.map(t =>
+        `<option value="${t.id}"${t.id === data.default ? ' selected' : ''}>${t.label}</option>`
+      ).join('');
+    } catch(e) {
+      console.error('Could not load music tracks', e);
+      // Fallback: just show "No Music"
+      document.getElementById('musicSelect').innerHTML =
+        '<option value="none">No Music</option>';
     }
   }
 
@@ -747,6 +863,7 @@
     }
 
     const voice_id    = document.getElementById('voiceSelect').value;
+    const music_id    = document.getElementById('musicSelect').value;
     const style_notes = document.getElementById('notesInput').value.trim();
 
     try {
@@ -758,6 +875,7 @@
           mode:             currentMode,
           style:            currentStyle,
           voice_id,
+          music_id,
           captions:         currentCaps,
           caption_words:    currentCapWords,
           caption_size:     currentCapSize,
@@ -808,11 +926,14 @@
 
       el.innerHTML = allItems.map(item => {
         const voiceLabel = voices.find(v => v.id === item.voice_id)?.label || item.voice_id || '';
+        const musicLabel = musicTracks.find(t => t.id === item.music_id)?.label || '';
         const notes = item.style_notes ? `<div class="notes-preview">"${escHtml(item.style_notes)}"</div>` : '';
         const capBadge = item.mode === 'short' && item.captions
           ? `<span class="badge cap-b">CC</span>` : '';
         const scriptBadge = item.script
           ? `<span class="badge" style="background:#1a1a2e;color:#7070ff;font-size:9px;padding:2px 7px;">📄 SCRIPT</span>` : '';
+        const musicBadge = item.music_id && item.music_id !== 'none'
+          ? `<span class="badge music-b">♪ ${escHtml(musicLabel)}</span>` : '';
 
         return `
           <div class="queue-item">
@@ -822,6 +943,7 @@
             <span class="badge ${item.style === 'funny' ? 'funny-b' : 'serious-b'}">${item.style === 'funny' ? '😄' : '🎙'} ${item.style}</span>
             ${capBadge}
             ${scriptBadge}
+            ${musicBadge}
             <span class="badge voice-b">${escHtml(voiceLabel)}</span>
             <span class="badge ${item.status}">${item.status}</span>
             ${item.status === 'queued' ? `<button class="btn danger" onclick="removeFromQueue('${item.id}')">✕</button>` : ''}
@@ -906,6 +1028,7 @@
   // ---- Init ----
   setMode('long');   // hides captions toggle + sub-panel initially
   loadVoices();
+  loadMusic();
   refreshQueue();
   refreshVideos();
   pollStatus();

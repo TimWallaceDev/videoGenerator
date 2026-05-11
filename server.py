@@ -21,8 +21,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from main   import run_pipeline
 from status import pipeline_status
-from config import OUTPUT_DIR, BASE_DIR, VOICES, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT, CAPTION_WORDS, CAPTION_POSITION
+from config import OUTPUT_DIR, BASE_DIR, VOICES, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT, CAPTION_WORDS, CAPTION_POSITION, get_music_tracks, DEFAULT_MUSIC_ID
 import comfyui
+import trends
 
 app = FastAPI(title="Video Pipeline")
 
@@ -53,6 +54,7 @@ class QueueItem:
         status:           str  = "queued",
         output:           str  = None,
         error:            str  = None,
+        music_id:         str  = None, 
     ):
         self.id               = item_id or str(uuid.uuid4())[:8]
         self.topic            = topic
@@ -69,6 +71,7 @@ class QueueItem:
         self.added_at         = added_at or datetime.now().isoformat()
         self.output           = output
         self.error            = error
+        self.music_id         = music_id         or DEFAULT_MUSIC_ID
 
     def to_dict(self) -> dict:
         return {
@@ -87,6 +90,7 @@ class QueueItem:
             "added_at":         self.added_at,
             "output":           self.output,
             "error":            self.error,
+            "music_id":         self.music_id,
         }
 
     @classmethod
@@ -107,6 +111,7 @@ class QueueItem:
             status           = d.get("status",           "queued"),
             output           = d.get("output"),
             error            = d.get("error"),
+            music_id         = d.get("music_id",         DEFAULT_MUSIC_ID),
         )
 
 
@@ -202,6 +207,7 @@ def queue_worker():
                 caption_position=item.caption_position,
                 style_notes=item.style_notes,
                 script=item.script or None,
+                music_id=item.music_id,
             )
             item.status = "done"
             item.output = output_path
@@ -243,6 +249,7 @@ class TopicRequest(BaseModel):
     caption_position: str  = CAPTION_POSITION
     style_notes:      str  = ""
     script:           str  = ""
+    music_id:         str  = DEFAULT_MUSIC_ID
 
 
 @app.on_event("startup")
@@ -276,6 +283,22 @@ def list_voices():
     """Return available voices for the frontend dropdown."""
     return {"voices": VOICES, "default": DEFAULT_VOICE_ID}
 
+@app.get("/music")
+def list_music():
+    """Return available music tracks for the frontend dropdown."""
+    tracks = get_music_tracks()
+    return {"tracks": tracks, "default": DEFAULT_MUSIC_ID}
+
+@app.get("/trends")
+def get_trends(region: str = "US"):
+    """
+    Return trending topics for a region.
+    region query param: "US" | "CA" | "GLOBAL"
+    
+    Example: GET /trends?region=CA
+    """
+    result = trends.get_trending(region)
+    return result
 
 @app.post("/queue")
 def add_to_queue(req: TopicRequest):
@@ -299,6 +322,7 @@ def add_to_queue(req: TopicRequest):
         caption_position=req.caption_position,
         style_notes=req.style_notes,
         script=req.script,
+        music_id=req.music_id,
     )
     with queue_lock:
         queue.append(item)

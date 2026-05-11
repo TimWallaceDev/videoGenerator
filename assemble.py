@@ -3,6 +3,7 @@
 #  Takes images + audio + Whisper timestamps and builds
 #  the final video with images switching at sentence boundaries.
 #  Includes Ken Burns zoom effect and duo captions for Shorts.
+#  Supports optional background music with fade in/out.
 # ============================================================
 
 import os
@@ -30,6 +31,9 @@ from config import (
     CAPTION_WORDS,
     CAPTION_POSITION,
     CAPTION_SIZE_MAP,
+    MUSIC_VOLUME,
+    MUSIC_FADE_DURATION,
+    get_music_file,
 )
 
 ZOOM_START = 1.0
@@ -276,6 +280,70 @@ def _build_filter_complex(
 
 
 # ------------------------------------------------------------
+#  Music mixing
+# ------------------------------------------------------------
+
+def _mix_music(
+    video_path: str,
+    music_path: str,
+    audio_duration: float,
+    output_path: str,
+) -> str:
+    """
+    Mix background music into an already-assembled video.
+
+    Takes the finished MP4, adds a music track as a second audio input,
+    loops it to cover the full duration, fades in/out, reduces volume,
+    and mixes with the narration. Outputs a new MP4.
+
+    This runs as a second ffmpeg pass after main assembly, keeping the
+    video filter graph completely clean.
+
+    Returns output_path.
+    """
+    volume    = MUSIC_VOLUME
+    fade_dur  = MUSIC_FADE_DURATION
+    fade_out_start = max(0.0, audio_duration - fade_dur)
+
+    # Music filter chain:
+    # aloop → atrim to exact duration → fade in → fade out → volume reduce
+    music_filter = (
+        f"[1:a]"
+        f"aloop=loop=-1:size=2147483647,"
+        f"atrim=duration={audio_duration:.3f},"
+        f"afade=t=in:st=0:d={fade_dur:.3f},"
+        f"afade=t=out:st={fade_out_start:.3f}:d={fade_dur:.3f},"
+        f"volume={volume}"
+        f"[music];"
+        # Mix narration + music. duration=first keeps narration length.
+        # normalize=0 prevents amix from halving both streams' volumes.
+        f"[0:a][music]amix=inputs=2:duration=first:normalize=0[aout]"
+    )
+
+    cmd = [
+        FFMPEG, "-y",
+        "-i", video_path,       # input 0: assembled video (video + narration)
+        "-i", music_path,       # input 1: music track
+        "-filter_complex", music_filter,
+        "-map", "0:v",          # video stream from input 0
+        "-map", "[aout]",       # mixed audio
+        "-c:v", "copy",         # copy video stream — no re-encode needed
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-movflags", "+faststart",
+        output_path,
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print("\n❌ ffmpeg music mix error:")
+        print(result.stderr[-2000:])
+        raise RuntimeError("ffmpeg music mixing failed")
+
+    return output_path
+
+
+# ------------------------------------------------------------
 #  Main function
 # ------------------------------------------------------------
 
@@ -289,6 +357,7 @@ def assemble_video(
     caption_words: int = None,
     caption_size: str = None,
     caption_position: str = None,
+    music_id: str = "none",
 ) -> str:
     """
     Assemble the final video from images, audio, and timestamps.
@@ -296,6 +365,7 @@ def assemble_video(
     caption_words    : words per caption chunk (1-3)
     caption_size     : "small" | "medium" | "large"
     caption_position : "top" | "middle" | "bottom"
+    music_id         : track ID from config.get_music_tracks(), or "none"
     """
     if audio_path  is None: audio_path  = AUDIO_FILE
     if timestamps  is None: timestamps  = _load_timestamps()
@@ -311,19 +381,21 @@ def assemble_video(
     audio_duration = _get_audio_duration(audio_path)
     cfg            = VIDEO_CONFIGS[mode]
 
+    # Resolve music path upfront so we can report it early
+    music_path = get_music_file(music_id)
+
     print(f"📹 Assembling video...")
     print(f"   Mode      : {mode} ({cfg['width']}x{cfg['height']})")
     print(f"   Images    : {len(image_paths)}")
     print(f"   Timestamps: {len(timestamps)}")
     print(f"   Duration  : {audio_duration:.1f}s")
+    print(f"   Music     : {os.path.basename(music_path) if music_path else 'none'}")
 
     if len(image_paths) != len(timestamps):
         print(f"   ⚠️  Image/timestamp count mismatch — will map as many as possible.")
 
     # ----------------------------------------------------------
     #  Decide upfront whether captions are being added.
-    #  This determines the concat output label — doing it before
-    #  _build_filter_complex avoids any string replacement.
     # ----------------------------------------------------------
     caption_filters = []
     if mode == "short" and captions:
@@ -347,7 +419,6 @@ def assemble_video(
     )
 
     if use_captions:
-        # Append: [precaption] → drawtext chain → [outv]
         caption_chain  = "[precaption]" + ",".join(caption_filters) + "[outv]"
         filter_complex = filter_complex + ";\n" + caption_chain
         sz = caption_size or "medium"
@@ -356,18 +427,26 @@ def assemble_video(
         print(f"   Captions  : skipped (words.json not found or empty)")
 
     # ----------------------------------------------------------
-    #  Output path
+    #  Output paths
+    #  If music is requested we write to a temp file first,
+    #  then the music pass writes the final output.
     # ----------------------------------------------------------
     safe_topic  = re.sub(r'[^\w\s-]', '', topic).strip().replace(' ', '_')[:50]
     timestamp   = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = os.path.join(OUTPUT_DIR, f"{safe_topic}_{timestamp}.mp4")
+    final_path  = os.path.join(OUTPUT_DIR, f"{safe_topic}_{timestamp}.mp4")
+
+    if music_path:
+        # Write video+narration to a temp file; music pass produces final
+        assembly_path = os.path.join(TEMP_DIR, f"_premix_{timestamp}.mp4")
+    else:
+        assembly_path = final_path
 
     # Write filter_complex to a temp file to avoid command-line length limits
     filter_file = os.path.join(TEMP_DIR, "filter_complex.txt")
     with open(filter_file, "w", encoding="utf-8") as f:
         f.write(filter_complex)
 
-    print(f"   Running ffmpeg...")
+    print(f"   Running ffmpeg (video assembly)...")
 
     cmd = (
         [FFMPEG, "-y"]
@@ -384,7 +463,7 @@ def assemble_video(
             "-b:a", "192k",
             "-shortest",
             "-movflags", "+faststart",
-            output_path,
+            assembly_path,
         ]
     )
 
@@ -395,13 +474,26 @@ def assemble_video(
         print(result.stderr[-3000:])
         raise RuntimeError("ffmpeg assembly failed")
 
-    size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"✅ Video saved to {output_path} ({size_mb:.1f} MB)")
-
     if os.path.exists(filter_file):
         os.remove(filter_file)
 
-    return output_path
+    # ----------------------------------------------------------
+    #  Music mixing pass (if requested)
+    # ----------------------------------------------------------
+    if music_path:
+        print(f"   Running ffmpeg (music mix: {os.path.basename(music_path)} @ {MUSIC_VOLUME} vol)...")
+        try:
+            _mix_music(assembly_path, music_path, audio_duration, final_path)
+        finally:
+            # Always clean up the premix temp file
+            if os.path.exists(assembly_path):
+                os.remove(assembly_path)
+        print(f"   ✅ Music mixed in")
+    
+    size_mb = os.path.getsize(final_path) / (1024 * 1024)
+    print(f"✅ Video saved to {final_path} ({size_mb:.1f} MB)")
+
+    return final_path
 
 
 def cleanup_temp():
