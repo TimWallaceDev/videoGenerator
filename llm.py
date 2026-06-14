@@ -19,9 +19,6 @@ def _chat(system: str, user: str) -> str:
     payload = {
         "model":  OLLAMA_MODEL,
         "stream": False,
-        "options": {
-        "num_ctx": 4096
-        },
         "messages": [
             {"role": "system", "content": system},
             {"role": "user",   "content": user},

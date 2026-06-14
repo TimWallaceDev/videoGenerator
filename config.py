@@ -18,7 +18,7 @@ TIMESTAMPS_FILE = os.path.join(TEMP_DIR, "timestamps.json")
 WORDS_FILE      = os.path.join(TEMP_DIR, "words.json")
 
 # --- Ollama ---
-OLLAMA_MODEL    = "llama3.1:8b"
+OLLAMA_MODEL    = "qwen2.5:14b"
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 # --- ComfyUI ---
@@ -131,7 +131,7 @@ IMAGE_PROMPT_PREFIX = (
 # ============================================================
 
 _SCRIPT_SERIOUS_LONG = """
-You are a writer for a high-quality Video Production company that covers a wide range
+You are a writer for a high-quality YouTube channel that covers a wide range
 of topics — history, psychology, science, true crime, biography, culture, and
 more. Your job is to turn any subject into a gripping, story-driven video that
 feels as compelling as the best documentaries ever made.
@@ -361,9 +361,6 @@ RULES:
 
 Example:
 ["Close-up of weathered hands gripping a worn leather journal, shallow depth of field, warm candlelight, photorealistic", "Wide shot of an empty brutalist government corridor at night, single overhead light, long shadows, 35mm grain"]
-
-NEVER USE THIS PROMPT OR ANYTHING SIMILAR:  A confused-looking generic person in a mundane setting, deadpan composition, bright flat lighting, photorealistic.
-
 """
 
 _IMAGE_PROMPT_FUNNY = """
@@ -385,8 +382,6 @@ RULES:
 
 Example:
 ["A man in an ill-fitting suit staring blankly at an enormous stack of paper taller than he is, fluorescent office lighting, deadpan wide shot", "Extreme close-up of a single wilting houseplant on an otherwise empty conference table, harsh overhead light, photorealistic"]
-
-NEVER USE THIS PROMPT OR ANYTHING SIMILAR:  A confused-looking generic person in a mundane setting, deadpan composition, bright flat lighting, photorealistic. 
 """
 
 
