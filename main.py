@@ -21,7 +21,8 @@ from config import (
     TEMP_DIR, OUTPUT_DIR, IMAGES_DIR,
     TIMESTAMPS_FILE, AUDIO_FILE, VIDEO_CONFIGS,
     VIDEO_STYLE, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT,
-    CAPTION_WORDS, CAPTION_POSITION, DEFAULT_MUSIC_ID
+    CAPTION_WORDS, CAPTION_POSITION,
+    DEFAULT_IMAGE_MODEL_ID, DEFAULT_MUSIC_ID,
 )
 
 
@@ -60,6 +61,7 @@ def run_pipeline(
     caption_position: str  = None,
     style_notes:      str  = "",
     script:           str  = None,
+    image_model_id:   str  = None,
     music_id:         str  = None,
 ):
     """
@@ -73,6 +75,8 @@ def run_pipeline(
     style_notes      : Optional free-text modifier appended to the script prompt.
     script           : If provided, skip research + LLM script generation entirely
                        and use this text as the script verbatim.
+    image_model_id   : ID from config.IMAGE_MODELS. Defaults to DEFAULT_IMAGE_MODEL_ID.
+    music_id         : ID from config.get_music_tracks(). Defaults to DEFAULT_MUSIC_ID.
     """
     if voice_id is None:
         voice_id = DEFAULT_VOICE_ID
@@ -82,13 +86,14 @@ def run_pipeline(
         caption_words = CAPTION_WORDS
     if caption_position is None:
         caption_position = CAPTION_POSITION
+    if image_model_id is None:
+        image_model_id = DEFAULT_IMAGE_MODEL_ID
     if music_id is None:
         music_id = DEFAULT_MUSIC_ID
 
     cfg        = VIDEO_CONFIGS[mode]
     start_time = datetime.now()
 
-    # Always start fresh — prevents previous run bleeding into next topic
     clear_state()
 
     print(f"\n{'='*60}")
@@ -97,6 +102,8 @@ def run_pipeline(
     print(f"  Mode     : {'AUTO' if auto else 'MANUAL'} | {mode.upper()} ({cfg['width']}x{cfg['height']})")
     print(f"  Style    : {style.upper()}")
     print(f"  Voice    : {voice_id}")
+    print(f"  ImgModel : {image_model_id}")
+    print(f"  Music    : {music_id}")
     print(f"  Captions : {captions}" + (f" | {caption_words}w | {caption_size or 'medium'} | {caption_position}" if captions and mode == "short" else ""))
     if script:
         print(f"  Script   : provided ({len(script.split())} words)")
@@ -115,7 +122,6 @@ def run_pipeline(
     if script:
         pipeline_status.update("Script", 1, "Using provided script", 20)
         print("[ Step 1 / 5 ] — Script (provided, skipping research + generation)")
-        # Normalise line endings and strip leading/trailing whitespace
         script = script.strip()
     else:
         pipeline_status.update("Research + Script", 1, "Researching topic...", 5)
@@ -161,7 +167,7 @@ def run_pipeline(
     est_secs = len(prompts) * 45
     pipeline_status.update("Image Generation", 5, f"Generating {len(prompts)} images...", 60)
     print(f"[ Step 5 / 5 ] — Image generation ({len(prompts)} images, ~{est_secs//60}m {est_secs%60}s)")
-    image_paths = generate_images(prompts, mode=mode)
+    image_paths = generate_images(prompts, mode=mode, model_id=image_model_id)
 
     # --------------------------------------------------------
     #  FINAL — Assemble
@@ -212,6 +218,8 @@ if __name__ == "__main__":
     parser.add_argument("--style",       choices=["serious", "funny"], default=VIDEO_STYLE)
     parser.add_argument("--voice",       type=str, default=DEFAULT_VOICE_ID,
                         help="Voice ID from config.VOICES")
+    parser.add_argument("--image-model", type=str, default=DEFAULT_IMAGE_MODEL_ID,
+                        help="Image model ID from config.IMAGE_MODELS")
     parser.add_argument("--script",            type=str, default=None,
                         help="Path to a .txt file containing the script to use verbatim")
     parser.add_argument("--no-captions",      action="store_true",
@@ -224,11 +232,12 @@ if __name__ == "__main__":
                         choices=["top","middle","bottom"])
     parser.add_argument("--notes",       type=str, default="",
                         help='Style notes, e.g. "focus on the psychology angle"')
+    parser.add_argument("--music",       type=str, default=DEFAULT_MUSIC_ID,
+                        help="Music track ID (stem of filename in music/ dir, or 'none')")
 
     args = parser.parse_args()
 
     try:
-        # Load script from file if --script path provided
         provided_script = None
         if args.script:
             with open(args.script, "r", encoding="utf-8") as f:
@@ -246,6 +255,8 @@ if __name__ == "__main__":
             caption_position=args.caption_position,
             style_notes=args.notes,
             script=provided_script,
+            image_model_id=args.image_model,
+            music_id=args.music,
         )
     except KeyboardInterrupt:
         print("\n\n⚠️  Pipeline interrupted by user.")

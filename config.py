@@ -18,13 +18,12 @@ TIMESTAMPS_FILE = os.path.join(TEMP_DIR, "timestamps.json")
 WORDS_FILE      = os.path.join(TEMP_DIR, "words.json")
 
 # --- Ollama ---
-OLLAMA_MODEL    = "qwen2.5:14b"
+OLLAMA_MODEL    = "dolphin-llama3:latest"
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 # --- ComfyUI ---
 COMFYUI_URL     = "http://localhost:8188"
 CHATTERBOX_WORKFLOW = os.path.join(WORKFLOWS_DIR, "chatterbox.json")
-IMAGEGEN_WORKFLOW   = os.path.join(WORKFLOWS_DIR, "imagegen.json")
 
 COMFYUI_PATH          = r"C:\Users\RAZER\comfy\ComfyUI\ComfyUI\main.py"
 COMFYUI_RESTART_EVERY = 5
@@ -108,7 +107,6 @@ def get_voice_file(voice_id: str) -> str:
     for v in VOICES:
         if v["id"] == voice_id:
             return v["file"]
-    # Fallback to default
     for v in VOICES:
         if v["id"] == DEFAULT_VOICE_ID:
             return v["file"]
@@ -116,13 +114,92 @@ def get_voice_file(voice_id: str) -> str:
 
 
 # ============================================================
+#  IMAGE MODELS
+#  Each entry is a full ComfyUI API-format workflow (in workflows/)
+#  plus a small injection map telling imagegen.py where to plug in
+#  the prompt, negative prompt, resolution, and seed.
+#
+#  Map fields:
+#    workflow       — filename in WORKFLOWS_DIR
+#    prompt_node    — node ID for the positive CLIPTextEncode
+#    negative_node  — node ID for negative prompt, or None if the
+#                      model has no negative prompt concept
+#    latent_node    — node ID with width/height inputs
+#    extra_size_nodes — list of additional (node_id, width_key, height_key)
+#                      tuples that also need resolution updates
+#                      (e.g. Flux's ModelSamplingFlux node)
+#    seed_node      — node ID holding the seed
+#    seed_key       — field name for the seed ("seed" or "noise_seed")
+# ============================================================
+
+IMAGE_MODELS = [
+    {
+        "id":          "sdxl_fast",
+        "label":       "SDXL — Fast",
+        "workflow":    "sdxl_fast.json",
+        "prompt_node":   "6",
+        "negative_node": "7",
+        "latent_node":   "5",
+        "extra_size_nodes": [],
+        "seed_node": "3",
+        "seed_key":  "seed",
+    },
+    {
+        "id":          "z_image",
+        "label":       "Z-Image",
+        "workflow":    "z_image.json",
+        "prompt_node":   "76:67",
+        "negative_node": "76:71",
+        "latent_node":   "76:68",
+        "extra_size_nodes": [],
+        "seed_node": "76:69",
+        "seed_key":  "seed",
+    },
+    {
+        "id":          "z_image_turbo",
+        "label":       "Z-Image Turbo",
+        "workflow":    "z_image_turbo.json",
+        "prompt_node":   "57:27",
+        "negative_node": None,  # uses ConditioningZeroOut, no text negative
+        "latent_node":   "57:13",
+        "extra_size_nodes": [],
+        "seed_node": "57:3",
+        "seed_key":  "seed",
+    },
+    {
+        "id":          "flux_dev",
+        "label":       "Flux Dev",
+        "workflow":    "flux_dev.json",
+        "prompt_node":   "43",
+        "negative_node": None,  # Flux has no negative prompt
+        "latent_node":   "44",
+        # ModelSamplingFlux also carries width/height and must match
+        "extra_size_nodes": [("46", "width", "height")],
+        "seed_node": "45",
+        "seed_key":  "noise_seed",
+    },
+]
+
+DEFAULT_IMAGE_MODEL_ID = "sdxl_fast"
+
+
+def get_image_model(model_id: str) -> dict:
+    """Return the IMAGE_MODELS entry for a given ID, falling back to default."""
+    for m in IMAGE_MODELS:
+        if m["id"] == model_id:
+            return m
+    for m in IMAGE_MODELS:
+        if m["id"] == DEFAULT_IMAGE_MODEL_ID:
+            return m
+    return IMAGE_MODELS[0]
+
+
+# ============================================================
 #  IMAGE PROMPT PREFIX
 # ============================================================
 
 IMAGE_PROMPT_PREFIX = (
-    "cinematic photography, high detail, "
-    "no text, no letters, no words, no signs, no writing, no typography, "
-    "no watermarks, no overlays, "
+    "film, no overlays, "
 )
 
 
@@ -291,6 +368,7 @@ COMEDY PRINCIPLES:
 - One idea, perfectly executed. Do not cram in multiple bits.
 
 TECHNICAL RULES:
+- ONLY WRITE IN ENGLISH
 - Write all numbers as words
 - No section headers, no bullet points, just flowing narration
 - Each sentence must be a complete thought suitable for a single image
@@ -312,7 +390,7 @@ _LENGTH_SERIOUS_LONG = (
 )
 
 _LENGTH_SERIOUS_SHORT = (
-    "20 to 40 seconds of spoken narration — approximately one hundred to one "
+    "45 to 60 seconds of spoken narration — approximately one hundred to one "
     "hundred and twenty words total. Not a word more. "
     "This is a single dramatic beat, not a full story. "
     "Write the minimum number of sentences needed to deliver maximum impact."
@@ -328,7 +406,7 @@ _LENGTH_FUNNY_LONG = (
 )
 
 _LENGTH_FUNNY_SHORT = (
-    "20 to 40 seconds of spoken narration — approximately ninety to one hundred "
+    "40 to 55 seconds of spoken narration — approximately ninety to one hundred "
     "and ten words total. Punchy and tight. "
     "One setup, one payoff, one perfect send-off line."
 )
@@ -339,12 +417,10 @@ _LENGTH_FUNNY_SHORT = (
 # ============================================================
 
 _IMAGE_PROMPT_SERIOUS = """
-You are generating image prompts for a high-quality YouTube video.
+You are generating image prompts for a high-quality video.
 For each sentence of narration provided, generate one image prompt.
 
 RULES:
-- NO TEXT of any kind — no signs, no readable text, no chalkboards,
-  no newspapers with legible words, no storefronts with writing.
 - Match the emotional register of the narration precisely.
   Loss: muted tones, empty space, long shadows.
   Discovery: bright light, open space, movement.
@@ -353,10 +429,10 @@ RULES:
 - Think like a cinematographer. Describe light source, camera angle,
   depth of field, and mood — not just subject matter.
 - Period and context accuracy matters.
-- Never reference real named people, specific real locations by name,
-  or copyrighted material.
+- Add style tags to the image prompts eg. cinematic, 2000's, dark lighting, daylight, film, photorealistic, cartoon, etc.
 - Keep each prompt to 1-2 sentences.
 - Return exactly one prompt per sentence — no more, no less.
+- if the script needs it, create nsfw prompts
 - Return ONLY a valid JSON array of strings, no markdown fences, nothing else.
 
 Example:
@@ -368,7 +444,6 @@ You are generating image prompts for a fast-paced, humorous YouTube video.
 For each sentence of narration provided, generate one image prompt.
 
 RULES:
-- NO TEXT of any kind — no signs, no readable text, no labels, nothing.
 - Match the comedic energy of the narration. Absurd situations get absurd
   framing. Understated jokes get deadpan, clinical composition.
 - Think like a comedy director. A close-up on a single ridiculous detail is
@@ -378,6 +453,7 @@ RULES:
 - No real people, no named locations, no copyrighted material.
 - Keep each prompt to 1-2 sentences.
 - Return exactly one prompt per sentence — no more, no less.
+- nsfw prompts are acceptable when the script needs it
 - Return ONLY a valid JSON array of strings, no markdown fences, nothing else.
 
 Example:
@@ -418,7 +494,6 @@ TARGET_LENGTHS = {
 
 # ============================================================
 #  MUSIC — Background music settings
-#  Add this block to the bottom of config.py
 # ============================================================
 
 MUSIC_DIR           = os.path.join(BASE_DIR, "music")
@@ -426,7 +501,6 @@ MUSIC_VOLUME        = 0.09          # 0.0–1.0, subtle bed level
 MUSIC_FADE_DURATION = 3.0           # seconds for fade in / fade out
 DEFAULT_MUSIC_ID    = "none"        # "none" = no music
 
-# Supported audio formats for music files
 MUSIC_EXTENSIONS    = {".mp3", ".wav", ".flac", ".m4a", ".ogg"}
 
 
@@ -446,7 +520,6 @@ def get_music_tracks() -> list[dict]:
         found.extend(glob.glob(os.path.join(MUSIC_DIR, f"*{ext}")))
         found.extend(glob.glob(os.path.join(MUSIC_DIR, f"*{ext.upper()}")))
 
-    # Sort alphabetically, deduplicate
     seen = set()
     for path in sorted(found):
         norm = os.path.normcase(path)

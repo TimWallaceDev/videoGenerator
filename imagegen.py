@@ -1,191 +1,129 @@
 # ============================================================
-#  IMAGEGEN MODULE — Qwen Image via ComfyUI
-#  Generates one image per sentence prompt, saves to IMAGES_DIR.
-#  Uses the expanded subgraph nodes directly (ComfyUI API
-#  does not support subgraph node types natively).
+#  IMAGEGEN MODULE — Multi-model image generation via ComfyUI
+#
+#  Each image model is a full ComfyUI API-format workflow stored
+#  in workflows/, with an injection map in config.IMAGE_MODELS
+#  telling this module where to plug in prompt, negative prompt,
+#  resolution, and seed.
 # ============================================================
 
 import os
 import json
 import time
+import copy
 import uuid
 import random
 import requests
 import websocket
 from config import (
     COMFYUI_URL,
-    IMAGEGEN_WORKFLOW,
+    WORKFLOWS_DIR,
     IMAGES_DIR,
-    TEMP_DIR,
     IMAGE_PROMPT_PREFIX,
     VIDEO_CONFIGS,
+    IMAGE_MODELS,
+    DEFAULT_IMAGE_MODEL_ID,
+    get_image_model,
 )
 from status import pipeline_status
 
-# Use prefix from config
 PROMPT_PREFIX = IMAGE_PROMPT_PREFIX
 
 
 # ------------------------------------------------------------
-#  Build the API workflow from expanded subgraph nodes
+#  Workflow loading + injection
 # ------------------------------------------------------------
 
-def _build_api_workflow(prompt_text: str, seed: int = None, mode: str = "long") -> dict:
+_workflow_cache: dict[str, dict] = {}
+
+
+def _load_workflow_template(filename: str) -> dict:
+    """Load and cache a workflow JSON from WORKFLOWS_DIR."""
+    if filename not in _workflow_cache:
+        path = os.path.join(WORKFLOWS_DIR, filename)
+        with open(path, "r", encoding="utf-8") as f:
+            _workflow_cache[filename] = json.load(f)
+    return _workflow_cache[filename]
+
+
+def _build_api_workflow(
+    prompt_text: str,
+    model_id: str = None,
+    seed: int = None,
+    mode: str = "long",
+) -> dict:
     """
-    Build the ComfyUI API format workflow dict from the known
-    Qwen image subgraph nodes. All node IDs and connections are
-    hardcoded from the exported workflow JSON.
+    Build a ready-to-submit ComfyUI API workflow for the given image model.
+
+    - Loads the workflow template (cached after first load)
+    - Deep-copies it (templates are mutable dicts, never share state)
+    - Injects the positive prompt (with IMAGE_PROMPT_PREFIX)
+    - Injects the negative prompt, if the model supports one
+    - Sets resolution to match VIDEO_CONFIGS[mode]
+    - Sets a random seed if none provided
     """
+    spec = get_image_model(model_id or DEFAULT_IMAGE_MODEL_ID)
+
+    template = _load_workflow_template(spec["workflow"])
+    wf = copy.deepcopy(template)
+
     if seed is None:
         seed = random.randint(0, 2**32 - 1)
 
     full_prompt = PROMPT_PREFIX + prompt_text
 
-    api_workflow = {
-        # --- Load models ---
-        "37": {
-            "class_type": "UNETLoader",
-            "inputs": {
-                "unet_name": "qwen_image_fp8_e4m3fn.safetensors",
-                "weight_dtype": "default",
-            }
-        },
-        "38": {
-            "class_type": "CLIPLoader",
-            "inputs": {
-                "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
-                "type": "qwen_image",
-                "device": "default",
-            }
-        },
-        "39": {
-            "class_type": "VAELoader",
-            "inputs": {
-                "vae_name": "qwen_image_vae.safetensors",
-            }
-        },
+    # --- Positive prompt ---
+    wf[spec["prompt_node"]]["inputs"]["text"] = full_prompt
 
-        # --- LoRA ---
-        "73": {
-            "class_type": "LoraLoaderModelOnly",
-            "inputs": {
-                "model": ["37", 0],
-                "lora_name": "Qwen-Image-Lightning-4steps-V1.0.safetensors",
-                "strength_model": 1.0,
-            }
-        },
+    # --- Negative prompt (only if this model has one) ---
+    if spec["negative_node"]:
+        wf[spec["negative_node"]]["inputs"]["text"] = ""
 
-        # --- Sampling shift ---
-        "66": {
-            "class_type": "ModelSamplingAuraFlow",
-            "inputs": {
-                "model": ["73", 0],
-                "shift": 3.1,
-            }
-        },
+    # --- Resolution ---
+    cfg = VIDEO_CONFIGS[mode]
+    wf[spec["latent_node"]]["inputs"]["width"]  = cfg["width"]
+    wf[spec["latent_node"]]["inputs"]["height"] = cfg["height"]
 
-        # --- Prompts ---
-        "6": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "clip": ["38", 0],
-                "text": full_prompt,
-            }
-        },
-        "7": {
-            "class_type": "CLIPTextEncode",
-            "inputs": {
-                "clip": ["38", 0],
-                "text": "",  # negative prompt (empty)
-            }
-        },
+    for node_id, w_key, h_key in spec.get("extra_size_nodes", []):
+        wf[node_id]["inputs"][w_key] = cfg["width"]
+        wf[node_id]["inputs"][h_key] = cfg["height"]
 
-        # --- Latent image (size depends on mode) ---
-        "58": {
-            "class_type": "EmptySD3LatentImage",
-            "inputs": {
-                "width":      VIDEO_CONFIGS[mode]["width"],
-                "height":     VIDEO_CONFIGS[mode]["height"],
-                "batch_size": 1,
-            }
-        },
+    # --- Seed ---
+    wf[spec["seed_node"]]["inputs"][spec["seed_key"]] = seed
 
-        # --- KSampler (4 steps, cfg 1.0, euler/simple) ---
-        "3": {
-            "class_type": "KSampler",
-            "inputs": {
-                "model": ["66", 0],
-                "positive": ["6", 0],
-                "negative": ["7", 0],
-                "latent_image": ["58", 0],
-                "seed": seed,
-                "steps": 4,
-                "cfg": 1.0,
-                "sampler_name": "euler",
-                "scheduler": "simple",
-                "denoise": 1.0,
-            }
-        },
-
-        # --- Decode ---
-        "8": {
-            "class_type": "VAEDecode",
-            "inputs": {
-                "samples": ["3", 0],
-                "vae": ["39", 0],
-            }
-        },
-
-        # --- Save ---
-        "60": {
-            "class_type": "SaveImage",
-            "inputs": {
-                "images": ["8", 0],
-                "filename_prefix": "pipeline/img",
-            }
-        },
-    }
-
-    return api_workflow
+    return wf
 
 
 # ------------------------------------------------------------
 #  ComfyUI queue / wait / download helpers
+#  (model-agnostic — unchanged regardless of which image model runs)
 # ------------------------------------------------------------
 
 def _queue_prompt(api_workflow: dict) -> tuple[str, str]:
-    """Submit workflow to ComfyUI, return (prompt_id, client_id)."""
     client_id = str(uuid.uuid4())
-    payload   = {
-        "prompt":      api_workflow,
-        "client_id":   client_id,
-        "extra_data":  {"extra_pnginfo": {}},
+    payload = {
+        "prompt":     api_workflow,
+        "client_id":  client_id,
+        "extra_data": {"extra_pnginfo": {}},
     }
-    response  = requests.post(f"{COMFYUI_URL}/prompt", json=payload)
+    response = requests.post(f"{COMFYUI_URL}/prompt", json=payload)
     response.raise_for_status()
     return response.json()["prompt_id"], client_id
 
 
 def _free_comfyui_memory():
-    """
-    Tell ComfyUI to fully unload image models from VRAM.
-    Called once after all images are generated, before moving to next step.
-    """
+    """Tell ComfyUI to fully unload image models from VRAM."""
     try:
         requests.post(f"{COMFYUI_URL}/free", json={
-            "unload_models": True,  # fully evict Qwen from VRAM
+            "unload_models": True,
             "free_memory":   True,
         }, timeout=10)
         print("   🧹 ComfyUI image models unloaded from VRAM")
     except requests.RequestException:
-        pass  # non-critical, continue regardless
+        pass
 
 
 def _wait_for_completion(prompt_id: str, client_id: str, timeout: int = 600):
-    """
-    Wait for ComfyUI to finish executing the prompt.
-    Tries WebSocket first, falls back to polling history if connection drops.
-    """
     ws_url = f"{COMFYUI_URL.replace('http', 'ws')}/ws?clientId={client_id}"
 
     try:
@@ -206,41 +144,31 @@ def _wait_for_completion(prompt_id: str, client_id: str, timeout: int = 600):
     except (ConnectionResetError, ConnectionRefusedError,
             websocket.WebSocketConnectionClosedException,
             websocket.WebSocketTimeoutException, OSError):
-        # WebSocket dropped — fall back to polling history endpoint
         print("   ⚠️  WebSocket dropped, falling back to polling...")
         _poll_until_complete(prompt_id, timeout=600)
 
 
 def _poll_until_complete(prompt_id: str, timeout: int = 600):
-    """Poll the history endpoint until the prompt appears as completed."""
     start = time.time()
     while True:
         if time.time() - start > timeout:
             raise TimeoutError(f"Polling timed out after {timeout}s")
-
         try:
-            response = requests.get(
-                f"{COMFYUI_URL}/history/{prompt_id}", timeout=10
-            )
+            response = requests.get(f"{COMFYUI_URL}/history/{prompt_id}", timeout=10)
             history = response.json()
             if prompt_id in history:
                 outputs = history[prompt_id].get("outputs", {})
                 if outputs:
-                    return  # Job finished
+                    return
         except requests.RequestException:
-            pass  # ComfyUI briefly unavailable, keep polling
-
+            pass
         time.sleep(3)
 
 
 def _get_output_image(prompt_id: str) -> tuple[str, str]:
-    """
-    Poll ComfyUI history to find the output image filename.
-    Returns (filename, subfolder).
-    """
     for _ in range(10):
         response = requests.get(f"{COMFYUI_URL}/history/{prompt_id}")
-        history  = response.json()
+        history = response.json()
 
         if prompt_id in history:
             outputs = history[prompt_id].get("outputs", {})
@@ -255,7 +183,6 @@ def _get_output_image(prompt_id: str) -> tuple[str, str]:
 
 
 def _download_image(filename: str, subfolder: str, dest_path: str):
-    """Download a generated image from ComfyUI."""
     params = {"filename": filename, "type": "output"}
     if subfolder:
         params["subfolder"] = subfolder
@@ -271,24 +198,31 @@ def _download_image(filename: str, subfolder: str, dest_path: str):
 #  Main function
 # ------------------------------------------------------------
 
-def generate_images(prompts: list[str], mode: str = "long") -> list[str]:
+def generate_images(
+    prompts: list[str],
+    mode: str = "long",
+    model_id: str = None,
+) -> list[str]:
     """
-    Generate one image per prompt string.
+    Generate one image per prompt string using the selected image model.
+
+    model_id : ID from config.IMAGE_MODELS. Defaults to DEFAULT_IMAGE_MODEL_ID.
     Returns an ordered list of local image file paths.
     """
     os.makedirs(IMAGES_DIR, exist_ok=True)
 
-    total     = len(prompts)
+    spec  = get_image_model(model_id or DEFAULT_IMAGE_MODEL_ID)
+    total = len(prompts)
     img_paths = []
 
-    print(f"🖼️  Generating {total} images...")
+    print(f"🖼️  Generating {total} images [{spec['label']}]...")
 
     for i, prompt in enumerate(prompts, 1):
         pct = 60 + int((i / total) * 25)
-        pipeline_status.update("Image Generation", 5, f"Image {i}/{total}", pct)
+        pipeline_status.update("Image Generation", 5, f"Image {i}/{total} [{spec['label']}]", pct)
         print(f"   Image {i}/{total}...")
 
-        api_workflow = _build_api_workflow(prompt, mode=mode)
+        api_workflow = _build_api_workflow(prompt, model_id=model_id, mode=mode)
         prompt_id, client_id = _queue_prompt(api_workflow)
         _wait_for_completion(prompt_id, client_id)
 
@@ -299,28 +233,6 @@ def generate_images(prompts: list[str], mode: str = "long") -> list[str]:
 
         print(f"   ✅ Image {i} saved")
 
-    # All images done — now unload models to free VRAM for next step
     _free_comfyui_memory()
     print(f"✅ All {total} images generated")
     return img_paths
-
-
-# ------------------------------------------------------------
-#  Entry point for isolated testing
-# ------------------------------------------------------------
-
-if __name__ == "__main__":
-    test_prompts = [
-        "A quiet rural landscape in early nineteenth century North America, "
-        "rolling farmland, wooden fences, overcast sky, documentary style",
-
-        "A mid-century urban street in a North American city, brick buildings, "
-        "period automobiles, pedestrians in 1950s clothing, afternoon light",
-    ]
-
-    print("🧪 Testing imagegen module...")
-    paths = generate_images(test_prompts)
-
-    print(f"\n✅ Imagegen test complete.")
-    for p in paths:
-        print(f"   {p}")

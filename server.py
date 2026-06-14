@@ -21,7 +21,11 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from main   import run_pipeline
 from status import pipeline_status
-from config import OUTPUT_DIR, BASE_DIR, VOICES, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT, CAPTION_WORDS, CAPTION_POSITION, get_music_tracks, DEFAULT_MUSIC_ID
+from config import (
+    OUTPUT_DIR, BASE_DIR, VOICES, DEFAULT_VOICE_ID, CAPTIONS_DEFAULT,
+    CAPTION_WORDS, CAPTION_POSITION, get_music_tracks, DEFAULT_MUSIC_ID,
+    IMAGE_MODELS, DEFAULT_IMAGE_MODEL_ID,
+)
 import comfyui
 import trends
 
@@ -49,6 +53,7 @@ class QueueItem:
         caption_position: str  = None,
         style_notes:      str  = "",
         script:           str  = "",
+        image_model_id:   str  = None,
         item_id:          str  = None,
         added_at:         str  = None,
         status:           str  = "queued",
@@ -67,6 +72,7 @@ class QueueItem:
         self.caption_position = caption_position or CAPTION_POSITION
         self.style_notes      = style_notes      or ""
         self.script           = script           or ""
+        self.image_model_id   = image_model_id   or DEFAULT_IMAGE_MODEL_ID
         self.status           = status
         self.added_at         = added_at or datetime.now().isoformat()
         self.output           = output
@@ -86,6 +92,7 @@ class QueueItem:
             "caption_position": self.caption_position,
             "style_notes":      self.style_notes,
             "script":           self.script,
+            "image_model_id":   self.image_model_id,
             "status":           self.status,
             "added_at":         self.added_at,
             "output":           self.output,
@@ -106,6 +113,7 @@ class QueueItem:
             caption_position = d.get("caption_position", CAPTION_POSITION),
             style_notes      = d.get("style_notes", ""),
             script           = d.get("script",     ""),
+            image_model_id   = d.get("image_model_id", DEFAULT_IMAGE_MODEL_ID),
             item_id          = d.get("id"),
             added_at         = d.get("added_at"),
             status           = d.get("status",           "queued"),
@@ -207,6 +215,7 @@ def queue_worker():
                 caption_position=item.caption_position,
                 style_notes=item.style_notes,
                 script=item.script or None,
+                image_model_id=item.image_model_id,
                 music_id=item.music_id,
             )
             item.status = "done"
@@ -249,6 +258,7 @@ class TopicRequest(BaseModel):
     caption_position: str  = CAPTION_POSITION
     style_notes:      str  = ""
     script:           str  = ""
+    image_model_id:   str  = DEFAULT_IMAGE_MODEL_ID
     music_id:         str  = DEFAULT_MUSIC_ID
 
 
@@ -282,6 +292,13 @@ def serve_frontend():
 def list_voices():
     """Return available voices for the frontend dropdown."""
     return {"voices": VOICES, "default": DEFAULT_VOICE_ID}
+
+@app.get("/image-models")
+def list_image_models():
+    """Return available image models for the frontend dropdown."""
+    models = [{"id": m["id"], "label": m["label"]} for m in IMAGE_MODELS]
+    return {"models": models, "default": DEFAULT_IMAGE_MODEL_ID}
+
 
 @app.get("/music")
 def list_music():
@@ -322,6 +339,7 @@ def add_to_queue(req: TopicRequest):
         caption_position=req.caption_position,
         style_notes=req.style_notes,
         script=req.script,
+        image_model_id=req.image_model_id,
         music_id=req.music_id,
     )
     with queue_lock:
