@@ -145,6 +145,8 @@
   .tog-btn.active.funny   { background: var(--accent4); border-color: var(--accent4); color: #000; }
   .tog-btn.active.cap-on  { background: var(--success); border-color: var(--success); color: #000; }
   .tog-btn.active.cap-off { background: var(--border);  border-color: var(--border);  color: var(--muted); }
+  .tog-btn.active.res-on  { background: var(--success); border-color: var(--success); color: #000; }
+  .tog-btn.active.res-off { background: var(--border);  border-color: var(--border);  color: var(--muted); }
 
   /* Caption sub-setting toggles — shared neutral active state */
   .caption-settings .tog-btn.active {
@@ -467,6 +469,74 @@
 
   .caption-settings.visible { display: flex; }
 
+  /* ---- Trending topics ---- */
+  .trends-section {
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+
+  .trends-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .trends-header .field-label { margin-bottom: 0; }
+
+  .trends-region-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .trends-region-btn:not(:last-child) { border-right: none; }
+
+  .trends-region-btn.active {
+    background: var(--accent4);
+    border-color: var(--accent4);
+    color: #000;
+  }
+
+  .trends-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 28px;
+  }
+
+  .trend-chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    padding: 4px 10px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+
+  .trend-chip:hover {
+    border-color: var(--accent4);
+    background: rgba(0,207,255,0.06);
+    color: var(--accent4);
+  }
+
+  .trends-loading {
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    padding: 4px 0;
+  }
+
   @keyframes flicker {
     0%, 100% { opacity: 1; } 92% { opacity: 1; }
     93% { opacity: 0.8; } 94% { opacity: 1; }
@@ -550,6 +620,15 @@
         </div>
       </div>
 
+      <!-- Research (prompt mode only) -->
+      <div class="control-group" id="researchGroup">
+        <label class="field-label">Research</label>
+        <div class="toggle-row">
+          <button class="tog-btn active res-on" id="btnResOn"  onclick="setResearch(true)">🔍 ON</button>
+          <button class="tog-btn res-off"        id="btnResOff" onclick="setResearch(false)">⚡ OFF</button>
+        </div>
+      </div>
+
       <!-- Voice -->
       <div class="control-group">
         <label class="field-label">Voice</label>
@@ -609,6 +688,21 @@
 
     </div>
 
+    <!-- Trending topics -->
+    <div class="trends-section" id="trendsSection">
+      <div class="trends-header">
+        <label class="field-label">Trending</label>
+        <div>
+          <button class="trends-region-btn active" id="tregUS"     onclick="setTrendsRegion('US')">US</button>
+          <button class="trends-region-btn"         id="tregCA"     onclick="setTrendsRegion('CA')">Canada</button>
+          <button class="trends-region-btn"         id="tregGLOBAL" onclick="setTrendsRegion('GLOBAL')">World</button>
+        </div>
+      </div>
+      <div class="trends-chips" id="trendsChips">
+        <span class="trends-loading">Loading trends...</span>
+      </div>
+    </div>
+
   </div>
 
   <!-- Status sidebar -->
@@ -643,11 +737,12 @@
   let lastStatus        = null;
   let currentMode       = 'long';
   let currentStyle      = 'serious';
-  let currentCaps       = true;
-  let currentCapWords   = 2;
-  let currentCapSize    = 'medium';
-  let currentCapPos     = 'bottom';
-  let voices            = [];
+  let currentCaps         = true;
+  let currentCapWords     = 2;
+  let currentCapSize      = 'medium';
+  let currentCapPos       = 'bottom';
+  let currentSkipResearch = false;
+  let voices              = [];
 
   // ---- Input mode ----
   let currentInputMode = 'prompt';
@@ -658,6 +753,13 @@
     document.getElementById('tabScript').className = 'input-tab' + (mode === 'script' ? ' active' : '');
     document.getElementById('panePrompt').className = 'input-pane' + (mode === 'prompt' ? ' active' : '');
     document.getElementById('paneScript').className = 'input-pane' + (mode === 'script' ? ' active' : '');
+    document.getElementById('researchGroup').style.display = mode === 'prompt' ? '' : 'none';
+  }
+
+  function setResearch(on) {
+    currentSkipResearch = !on;
+    document.getElementById('btnResOn').className  = 'tog-btn res-on'  + (on  ? ' active' : '');
+    document.getElementById('btnResOff').className = 'tog-btn res-off' + (!on ? ' active' : '');
   }
 
   // Live word/sentence counter for script textarea
@@ -811,6 +913,7 @@
           style_notes,
           script,
           image_model_id:   document.getElementById('imageModelSelect').value,
+          skip_research:    currentSkipResearch,
           music_id:         document.getElementById('musicSelect').value,
         })
       });
@@ -946,6 +1049,42 @@
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
+  // ---- Trending topics ----
+  let currentTrendsRegion = 'US';
+
+  function setTrendsRegion(region) {
+    currentTrendsRegion = region;
+    ['US','CA','GLOBAL'].forEach(r => {
+      document.getElementById('treg' + r).className =
+        'trends-region-btn' + (r === region ? ' active' : '');
+    });
+    loadTrends(region);
+  }
+
+  async function loadTrends(region) {
+    const chips = document.getElementById('trendsChips');
+    chips.innerHTML = '<span class="trends-loading">Loading...</span>';
+    try {
+      const res  = await fetch('/trends?region=' + region);
+      const data = await res.json();
+      if (!data.topics || data.topics.length === 0) {
+        chips.innerHTML = '<span class="trends-loading">No trends available.</span>';
+        return;
+      }
+      chips.innerHTML = data.topics.map(t =>
+        `<button class="trend-chip" onclick="pickTrend(${JSON.stringify(t)})">${escHtml(t)}</button>`
+      ).join('');
+    } catch(e) {
+      chips.innerHTML = '<span class="trends-loading">Could not load trends.</span>';
+    }
+  }
+
+  function pickTrend(topic) {
+    if (currentInputMode !== 'prompt') setInputMode('prompt');
+    document.getElementById('topicInput').value = topic;
+    document.getElementById('topicInput').focus();
+  }
+
   function showToast(msg) {
     const t = document.getElementById('toast');
     t.textContent = msg;
@@ -958,6 +1097,7 @@
   loadVoices();
   loadImageModels();
   loadMusic();
+  loadTrends('US');
   refreshQueue();
   refreshVideos();
   pollStatus();

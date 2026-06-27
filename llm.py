@@ -99,43 +99,33 @@ def generate_image_prompts(
     auto:  bool = False,
     style: str  = "serious",
 ) -> list[str]:
-    BATCH_SIZE  = 10
-    all_prompts = []
-    batches     = [sentences[i:i+BATCH_SIZE] for i in range(0, len(sentences), BATCH_SIZE)]
     system      = IMAGE_PROMPT_SYSTEMS[style]
+    all_prompts = []
+    total       = len(sentences)
 
-    print(f"🎨 Generating {len(sentences)} image prompts [{style}] in {len(batches)} batches...")
+    print(f"🎨 Generating {total} image prompts [{style}]...")
 
-    for batch_num, batch in enumerate(batches, 1):
-        print(f"   Batch {batch_num}/{len(batches)}...")
-        numbered = "\n".join(f"{i+1}. {s}" for i, s in enumerate(batch))
-        user     = f"Generate one image prompt for each of these narration sentences:\n\n{numbered}"
+    full_script = " ".join(sentences)
 
-        raw     = _chat(system, user)
-        cleaned = re.sub(r"```json|```", "", raw).strip()
-
-        try:
-            prompts = json.loads(cleaned)
-        except json.JSONDecodeError:
-            try:
-                prompts = []
-                for line in cleaned.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parsed = json.loads(line)
-                    if isinstance(parsed, list):
-                        prompts.extend(parsed)
-                    elif isinstance(parsed, str):
-                        prompts.append(parsed)
-            except json.JSONDecodeError:
-                print(f"   ⚠️  Batch {batch_num} failed to parse, using fallback prompts")
-                prompts = [_fallback_prompt(style)] * len(batch)
-
-        while len(prompts) < len(batch):
-            prompts.append(_fallback_prompt(style))
-        prompts = prompts[:len(batch)]
-        all_prompts.extend(prompts)
+    for i, sentence in enumerate(sentences, 1):
+        print(f"   Prompt {i}/{total}...")
+        user = (
+            f"Here is the full narration script for context:\n\n"
+            f"{full_script}\n\n"
+            f"Write one image generator prompt for this specific sentence:\n\n"
+            f'"{sentence}"\n\n'
+            f"Keep visuals consistent with what the script establishes (colours, setting, objects). "
+            f"Describe a single static composition — subject, framing, lighting, mood. "
+            f"No character names. No motion or actions. No text in the image. "
+            f"Return only the prompt text. No explanation, no formatting."
+        )
+        raw    = _chat(system, user)
+        prompt = raw.strip().strip('"').strip()
+        if not prompt:
+            prompt = _fallback_prompt(style)
+            print(f"   ⚠️  Prompt {i} empty, using fallback")
+        print(f"   [{i}] {prompt}")
+        all_prompts.append(prompt)
 
     print(f"✅ Image prompts generated")
 

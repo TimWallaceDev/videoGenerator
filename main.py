@@ -63,6 +63,7 @@ def run_pipeline(
     script:           str  = None,
     image_model_id:   str  = None,
     music_id:         str  = None,
+    skip_research:    bool = False,
 ):
     """
     Full pipeline from topic string to finished .mp4.
@@ -123,6 +124,14 @@ def run_pipeline(
         pipeline_status.update("Script", 1, "Using provided script", 20)
         print("[ Step 1 / 5 ] — Script (provided, skipping research + generation)")
         script = script.strip()
+    elif skip_research:
+        pipeline_status.update("Script", 1, "Generating script (no research)...", 10)
+        print("[ Step 1 / 5 ] — Script generation (research skipped)")
+        script = generate_script(
+            topic, auto=auto, research="",
+            mode=mode, style=style, style_notes=style_notes,
+        )
+        save_state({"script": script, "style": style})
     else:
         pipeline_status.update("Research + Script", 1, "Researching topic...", 5)
         print("[ Step 1 / 5 ] — Research + Script generation")
@@ -188,6 +197,12 @@ def run_pipeline(
         caption_position=caption_position,
         music_id=music_id,
     )
+
+    # Save script alongside the video with a matching filename
+    script_txt_path = os.path.splitext(output_path)[0] + ".txt"
+    with open(script_txt_path, "w", encoding="utf-8") as f:
+        f.write(script)
+    print(f"   📄 Script saved: {os.path.basename(script_txt_path)}")
 
     elapsed = datetime.now() - start_time
     print(f"\n{'='*60}")

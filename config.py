@@ -178,6 +178,17 @@ IMAGE_MODELS = [
         "seed_node": "45",
         "seed_key":  "noise_seed",
     },
+    {
+        "id":          "qwen_image",
+        "label":       "Qwen Image",
+        "workflow":    "qwen_image.json",
+        "prompt_node":   "75:6",
+        "negative_node": "75:7",
+        "latent_node":   "75:58",
+        "extra_size_nodes": [],
+        "seed_node": "75:3",
+        "seed_key":  "seed",
+    },
 ]
 
 DEFAULT_IMAGE_MODEL_ID = "sdxl_fast"
@@ -288,10 +299,24 @@ VOICE:
 
 TECHNICAL RULES:
 - Write all numbers as words
-- No section headers, no bullet points, just flowing narration
 - Each sentence must be a complete thought suitable for a single image
 - Target length: {target_length}
 {style_notes}
+
+OUTPUT FORMAT — THIS IS MANDATORY:
+Your entire response must be ONLY the words a narrator speaks out loud.
+Nothing else. No labels. No headers. No stage directions.
+
+FORBIDDEN — never write any of these:
+- "Cold open:" / "Opening line:" / "Conclusion:" / "Hook:" / "Outro:"
+- "Build:" / "Reveal:" / "Step one:" or any numbered or labeled sections
+- "[Narrator says...]" or any bracketed directions
+- "Here is the script:" or any preamble
+- Bullet points or numbered sentences
+
+CORRECT output looks like this:
+The script flows as plain sentences. One after another. Nothing else.
+Like this sentence. And this one. That is all you write.
 """
 
 _SCRIPT_FUNNY_LONG = """
@@ -370,10 +395,22 @@ COMEDY PRINCIPLES:
 TECHNICAL RULES:
 - ONLY WRITE IN ENGLISH
 - Write all numbers as words
-- No section headers, no bullet points, just flowing narration
-- Each sentence must be a complete thought suitable for a single image
 - Target length: {target_length}
 {style_notes}
+
+OUTPUT FORMAT — THIS IS MANDATORY:
+Your entire response must be ONLY the words a narrator speaks out loud.
+Nothing else. No labels. No headers. No stage directions.
+
+FORBIDDEN — never write any of these:
+- "Cold open:" / "Opening line:" / "Conclusion:" / "Hook:" / "Outro:"
+- "[Narrator says...]" or any bracketed directions
+- "Here is the script:" or any preamble
+- Bullet points or numbered sentences
+
+CORRECT output looks like this:
+The entire script flows as plain sentences. One after another. Nothing else.
+Like this sentence. And this one. That is all you write.
 """
 
 # ============================================================
@@ -421,43 +458,27 @@ You are generating image prompts for a high-quality video.
 For each sentence of narration provided, generate one image prompt.
 
 RULES:
-- Match the emotional register of the narration precisely.
-  Loss: muted tones, empty space, long shadows.
-  Discovery: bright light, open space, movement.
-  Power: dramatic architecture, high contrast, low angle.
-  Dread: tight framing, darkness at the edges, stillness.
-- Think like a cinematographer. Describe light source, camera angle,
-  depth of field, and mood — not just subject matter.
+- Make sure the image matches the scentence.
+- ALWAYS be specific
 - Period and context accuracy matters.
 - Add style tags to the image prompts eg. cinematic, 2000's, dark lighting, daylight, film, photorealistic, cartoon, etc.
 - Keep each prompt to 1-2 sentences.
 - Return exactly one prompt per sentence — no more, no less.
-- if the script needs it, create nsfw prompts
+- if the script is spicy, create nsfw prompts
 - Return ONLY a valid JSON array of strings, no markdown fences, nothing else.
-
-Example:
-["Close-up of weathered hands gripping a worn leather journal, shallow depth of field, warm candlelight, photorealistic", "Wide shot of an empty brutalist government corridor at night, single overhead light, long shadows, 35mm grain"]
 """
 
 _IMAGE_PROMPT_FUNNY = """
-You are generating image prompts for a fast-paced, humorous YouTube video.
+You are generating image prompts for a fast-paced, humorous video.
 For each sentence of narration provided, generate one image prompt.
 
 RULES:
-- Match the comedic energy of the narration. Absurd situations get absurd
-  framing. Understated jokes get deadpan, clinical composition.
-- Think like a comedy director. A close-up on a single ridiculous detail is
-  often funnier than a wide establishing shot.
-- Lean into unexpected angles and bathetic contrasts — the mundane presented
-  with the grandeur of an epic, or the important presented undignified.
-- No real people, no named locations, no copyrighted material.
+- Make sure the image matches the scentence.
+- NEVER use generic prompts like "A thoughtful scene with natural lighting". ALWAYS be specific
 - Keep each prompt to 1-2 sentences.
 - Return exactly one prompt per sentence — no more, no less.
-- nsfw prompts are acceptable when the script needs it
+- nsfw prompts are acceptable when the script needs it, dont be afraid to make things sexy and edgy. In fact, the sexier, the better
 - Return ONLY a valid JSON array of strings, no markdown fences, nothing else.
-
-Example:
-["A man in an ill-fitting suit staring blankly at an enormous stack of paper taller than he is, fluorescent office lighting, deadpan wide shot", "Extreme close-up of a single wilting houseplant on an otherwise empty conference table, harsh overhead light, photorealistic"]
 """
 
 

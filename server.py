@@ -54,6 +54,7 @@ class QueueItem:
         style_notes:      str  = "",
         script:           str  = "",
         image_model_id:   str  = None,
+        skip_research:    bool = False,
         item_id:          str  = None,
         added_at:         str  = None,
         status:           str  = "queued",
@@ -73,6 +74,7 @@ class QueueItem:
         self.style_notes      = style_notes      or ""
         self.script           = script           or ""
         self.image_model_id   = image_model_id   or DEFAULT_IMAGE_MODEL_ID
+        self.skip_research    = skip_research    if skip_research is not None else False
         self.status           = status
         self.added_at         = added_at or datetime.now().isoformat()
         self.output           = output
@@ -93,6 +95,7 @@ class QueueItem:
             "style_notes":      self.style_notes,
             "script":           self.script,
             "image_model_id":   self.image_model_id,
+            "skip_research":    self.skip_research,
             "status":           self.status,
             "added_at":         self.added_at,
             "output":           self.output,
@@ -114,6 +117,7 @@ class QueueItem:
             style_notes      = d.get("style_notes", ""),
             script           = d.get("script",     ""),
             image_model_id   = d.get("image_model_id", DEFAULT_IMAGE_MODEL_ID),
+            skip_research    = d.get("skip_research",  False),
             item_id          = d.get("id"),
             added_at         = d.get("added_at"),
             status           = d.get("status",           "queued"),
@@ -217,6 +221,7 @@ def queue_worker():
                 script=item.script or None,
                 image_model_id=item.image_model_id,
                 music_id=item.music_id,
+                skip_research=item.skip_research,
             )
             item.status = "done"
             item.output = output_path
@@ -259,6 +264,7 @@ class TopicRequest(BaseModel):
     style_notes:      str  = ""
     script:           str  = ""
     image_model_id:   str  = DEFAULT_IMAGE_MODEL_ID
+    skip_research:    bool = False
     music_id:         str  = DEFAULT_MUSIC_ID
 
 
@@ -340,6 +346,7 @@ def add_to_queue(req: TopicRequest):
         style_notes=req.style_notes,
         script=req.script,
         image_model_id=req.image_model_id,
+        skip_research=req.skip_research,
         music_id=req.music_id,
     )
     with queue_lock:
